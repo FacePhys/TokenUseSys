@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · 令牌用量</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script type="module" src="/assets/login.js"></script>
+</head>
+<body>
+  <main class="login-page">
+    <form id="login-form" class="login-card" autocomplete="on">
+      <h1>4Router 令牌用量</h1>
+      <div class="field">
+        <label for="username">用户名</label>
+        <input id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div id="login-error" class="form-error" role="alert"></div>
+      <button id="login-submit" class="btn btn-primary" type="submit">登录</button>
+    </form>
+  </main>
+</body>
+</html>

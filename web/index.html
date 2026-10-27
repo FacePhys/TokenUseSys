@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>令牌用量</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script defer src="/vendor/echarts.min.js"></script>
+  <script type="module" src="/assets/overview.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <h1>4Router 令牌用量</h1>
+      <span class="spacer"></span>
+      <button id="logout" class="btn btn-quiet" type="button">退出</button>
+    </header>
+    <div id="error" class="card" role="alert" hidden></div>
+    <div id="filters" class="filters"></div>
+    <div id="status" class="status-line" aria-live="polite"></div>
+    <section id="kpis" class="kpis" aria-label="区间指标"></section>
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head">
+          <h2>按天用量</h2>
+          <span id="bar-sub" class="sub"></span>
+          <span class="spacer"></span>
+          <span id="bar-view"></span>
+        </div>
+        <div id="bar-chart" class="chart" role="img" aria-label="按天用量，按令牌堆叠的柱状图；切到「表」可以看具体数字"></div>
+        <div id="bar-table" class="table-wrap" hidden></div>
+      </section>
+      <section class="card pie-card">
+        <div class="card-head">
+          <h2>占比</h2>
+          <span class="spacer"></span>
+          <span id="pie-mode"></span>
+        </div>
+        <div class="pie-layout">
+          <div id="pie-chart" class="chart donut" role="img" aria-label="占比环形图，右侧表格列出各项的数值和占比"></div>
+          <div id="pie-legend" class="legend-table table-wrap"></div>
+        </div>
+      </section>
+    </div>
+    <section class="card">
+      <div class="card-head">
+        <h2>令牌</h2>
+        <span id="token-sub" class="sub"></span>
+        <span class="spacer"></span>
+        <input id="search" class="search" type="search" placeholder="搜索令牌名或 key" aria-label="搜索令牌">
+      </div>
+      <div id="token-table" class="table-wrap"></div>
+    </section>
+  </div>
+</body>
+</html>

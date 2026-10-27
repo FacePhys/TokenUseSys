@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>令牌详情 · 令牌用量</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script defer src="/vendor/echarts.min.js"></script>
+  <script type="module" src="/assets/token.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <a id="back" class="back-link" href="/">← 总览</a>
+      <h1 id="title">令牌详情</h1>
+      <span class="spacer"></span>
+      <button id="logout" class="btn btn-quiet" type="button">退出</button>
+    </header>
+    <div id="error" class="card" role="alert" hidden></div>
+    <div id="filters" class="filters"></div>
+    <section class="card">
+      <div class="card-head"><h2>基本信息</h2><span class="sub">不随日期区间变</span></div>
+      <div id="info"></div>
+    </section>
+    <section id="kpis" class="kpis" aria-label="区间指标"></section>
+    <section class="card">
+      <div class="card-head">
+        <h2>趋势</h2>
+        <span id="trend-sub" class="sub"></span>
+        <span class="spacer"></span>
+        <span id="trend-controls" class="filters"></span>
+      </div>
+      <div id="trend-chart" class="chart" role="img" aria-label="用量趋势折线图；切到「表」可以看具体数字"></div>
+      <div id="trend-table" class="table-wrap" hidden></div>
+    </section>
+    <section class="card pie-card">
+      <div class="card-head"><h2>按模型</h2></div>
+      <div class="pie-layout">
+        <div id="model-chart" class="chart donut" role="img" aria-label="模型占比环形图，右侧表格列出各模型的数值"></div>
+        <div id="model-table" class="legend-table table-wrap"></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>最近请求</h2>
+        <span class="sub">明细只保留 90 天</span>
+        <span class="spacer"></span>
+        <span id="logs-controls"></span>
+      </div>
+      <div id="logs-table" class="table-wrap"></div>
+      <div id="logs-pager" class="pager"></div>
+    </section>
+  </div>
+</body>
+</html>

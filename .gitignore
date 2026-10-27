@@ -1,0 +1,12 @@
+# 本地配置含 4router access token 和会话密钥
+/config.yaml
+# 部署时 compose 用的环境变量
+/deploy/.env
+# 本地数据库和构建产物
+/data/
+/bin/
+/dist/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

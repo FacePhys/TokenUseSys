@@ -1,0 +1,11 @@
+# 构建上下文里不要有密钥和本地数据：config.yaml 含 4router access token，不能进镜像构建缓存。
+/config.yaml
+/deploy/.env
+/data/
+/bin/
+/dist/
+*.db
+*.db-wal
+*.db-shm
+.git
+.DS_Store

@@ -1,0 +1,41 @@
+# 复制为 config.yaml 后填值；config.yaml 含密钥，已 gitignore。未知字段会导致启动失败。
+
+upstream:
+  base_url: https://4router.net
+  access_token: ""            # 4router 系统访问令牌（拥有账号全部权限，不要外泄）
+  user_id: 0                  # 4router 用户 ID
+  timeout: 15s
+  min_request_interval: 2s
+
+sync:
+  log_interval: 60s
+  snapshot_interval: 5m
+  lag: 2m
+  backfill_days: 7            # 首次回填天数，决定页面最早能看到哪天；上限见开发文档 M1 第 10 步
+  reconcile_at: "03:30"
+
+storage:
+  sqlite_path: /var/lib/relayusage/usage.db
+  log_retention_days: 90
+  snapshot_retention_days: 90
+  backup_dir: /var/lib/relayusage/backups
+  backup_keep_days: 14
+
+server:
+  listen: 127.0.0.1:8200      # 容器里改成 0.0.0.0:8200，宿主机端口只绑 127.0.0.1
+  timezone: Asia/Shanghai     # 只支持没有夏令时的时区
+
+auth:
+  admin_user: admin
+  admin_password_hash: ""     # relayctl hash-password 生成
+  session_secret: ""          # openssl rand -hex 32
+  session_ttl: 12h
+
+alert:
+  webhook: ""                 # 可选：同步失败时通知（飞书 / 钉钉 / 企业微信机器人；安全设置用关键词 RelayUsage）
+
+log:
+  level: info                 # debug、info、warn、error
+  format: json                # json 或 text
+  dir: /var/log/relayusage    # 留空则写标准输出（本地开发）
+  retention_days: 7

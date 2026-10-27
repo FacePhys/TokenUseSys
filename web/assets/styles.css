@@ -1,0 +1,669 @@
+/* 看板样式（开发文档 §7）。颜色取自 dataviz 的默认色板，已用校验脚本验证（前 5 个色位，浅色和深色）；
+   浅色模式下青、黄、品红对背景不到 3:1，靠图例和表格视图补足。 */
+
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #f3f2ef;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --hover: rgba(11, 11, 11, 0.04);
+  --accent: #2a78d6;
+  --accent-track: #cde2fb;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --series-other: #898781;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --status-good-text: #006300;
+  --status-critical-text: #b42727;
+  --font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --surface-2: #242423;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --hover: rgba(255, 255, 255, 0.05);
+    --accent: #3987e5;
+    --accent-track: #184f95;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --status-good-text: #0ca30c;
+    --status-critical-text: #e66767;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --surface-2: #242423;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --hover: rgba(255, 255, 255, 0.05);
+  --accent: #3987e5;
+  --accent-track: #184f95;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --status-good-text: #0ca30c;
+  --status-critical-text: #e66767;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.5 var(--font);
+}
+
+a { color: inherit; }
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+[hidden] { display: none !important; }
+
+/* ---- 页面框架 ---- */
+
+.page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.topbar .spacer { flex: 1; }
+
+.back-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.back-link:hover { color: var(--text-primary); }
+
+/* 筛选只放一行，在所有图表上方，作用于下面全部内容。 */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.filters .spacer { flex: 1; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn:hover { background: var(--surface-2); }
+
+.btn:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+  background: var(--surface-1);
+}
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+.btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+/* ---- 日期区间选择器：预设一行一个，选中项打勾，自定义区间在底部分隔线下 ---- */
+
+.range-picker { position: relative; }
+
+.range-panel {
+  position: absolute;
+  z-index: 20;
+  top: 38px;
+  left: 0;
+  width: 280px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.range-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.range-option:hover { background: var(--hover); }
+
+.range-option .check {
+  width: 16px;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.range-option .hint {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.range-custom {
+  margin-top: 6px;
+  padding: 10px 10px 4px;
+  border-top: 1px solid var(--grid);
+}
+
+.range-custom label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.range-custom input {
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+}
+
+.range-custom .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.range-error {
+  min-height: 18px;
+  color: var(--status-critical-text);
+  font-size: 12px;
+}
+
+/* 分段切换：指标、按令牌 / 按模型、按天 / 按小时、图 / 表 */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.segmented button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.segmented button:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.segmented-label {
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+/* ---- 状态条 ---- */
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 24px;
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+}
+
+.status-line .meter { width: 160px; }
+
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent-track);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* 状态一律是图标 + 文字，不只靠颜色。 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.badge .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.badge.good .dot { background: var(--status-good); }
+.badge.warning .dot { background: var(--status-warning); }
+.badge.serious .dot { background: var(--status-serious); }
+.badge.critical .dot { background: var(--status-critical); }
+.badge.critical { color: var(--status-critical-text); }
+
+.badge .icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ---- 指标卡 ---- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.kpi {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.kpi .label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.kpi .value {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.kpi .sub {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 每个页面唯一的主数字：区间消费。比例数字，不用等宽。 */
+.kpi.hero { grid-column: span 2; }
+.kpi.hero .value { font-size: 48px; }
+
+/* ---- 卡片 ---- */
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 960px) {
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .kpi.hero { grid-column: span 1; }
+  .kpi.hero .value { font-size: 36px; }
+}
+
+.card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+  margin-bottom: 16px;
+}
+
+.grid-2 > .card { margin-bottom: 0; }
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.card-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.card-head .sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.card-head .spacer { flex: 1; }
+
+/* 图表容器的高度包含横轴标签那一带，卡片里不会出现嵌套滚动条。 */
+.chart { width: 100%; height: 320px; }
+.chart.donut { height: 260px; }
+
+.loading .chart,
+.loading .table-wrap,
+.loading .kpis,
+.loading .legend-table {
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ---- 饼图旁的图例表：图例兼表格视图 ---- */
+
+.pie-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 1.6fr);
+  gap: 12px;
+  align-items: center;
+}
+
+/* 图例表的名称列允许换行（模型名可能很长），数值列不换行，不会被截掉。 */
+.legend-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.legend-table th, .legend-table td { padding: 7px 6px; }
+
+/* 卡片窄时（总览右栏）环形图和图例上下排，名称和数值都放得下。 */
+.pie-card { container-type: inline-size; }
+
+@container (max-width: 560px) {
+  .pie-layout { grid-template-columns: minmax(0, 1fr); }
+  .pie-layout .chart.donut { height: 220px; }
+}
+
+/* 按天明细表的表头是令牌名，允许换行，表格不至于太宽。 */
+.matrix th {
+  white-space: normal;
+  min-width: 4em;
+  max-width: 120px;
+  vertical-align: bottom;
+}
+
+/* ---- 表格 ---- */
+
+.table-wrap { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--grid);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text-primary); }
+th .arrow { color: var(--text-muted); }
+
+td.num, th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tbody tr.clickable { cursor: pointer; }
+tbody tr.clickable:hover { background: var(--hover); }
+
+tfoot td {
+  font-weight: 600;
+  border-bottom: 0;
+}
+
+.muted { color: var(--text-muted); }
+.small { font-size: 12px; }
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  background: var(--series-other);
+}
+
+.name-cell .key {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.search {
+  height: 30px;
+  width: 200px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---- 令牌详情的基本信息 ---- */
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+}
+
+.info-grid dt {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.info-grid dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- 悬停提示：数值在前、名称在后，用短线标识序列 ---- */
+
+.tip { min-width: 160px; font: 12px/1.5 var(--font); }
+.tip-title { color: var(--text-secondary); margin-bottom: 4px; }
+
+.tip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tip-key {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  flex: none;
+}
+
+.tip-value {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tip-name { color: var(--text-secondary); }
+
+.tip-total {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--grid);
+}
+
+/* ---- 登录页 ---- */
+
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-1);
+}
+
+.login-card h1 {
+  margin: 0 0 20px;
+  font-size: 18px;
+}
+
+.field { margin-bottom: 14px; }
+
+.field label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+}
+
+.field input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.form-error {
+  min-height: 20px;
+  margin-bottom: 8px;
+  color: var(--status-critical-text);
+}
+
+.login-card .btn { width: 100%; justify-content: center; height: 36px; }
