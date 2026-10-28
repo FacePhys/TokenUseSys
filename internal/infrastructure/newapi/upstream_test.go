@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +74,56 @@ func TestTokensReturnsPartialOnFailure(t *testing.T) {
 	tokens, err := c.Tokens(context.Background())
 	require.Error(t, err)
 	require.Len(t, tokens, 100, "返回已拉到的令牌，由调用方决定不标删除")
+}
+
+// 上游把 page_size 压到 100 以下时，第 1 页不满 100 条也不是最后一页：只拉第 1 页的话，
+// 后面的令牌会被当成已删除（§4.4）。
+func TestTokensKeepsPagingWhenPageSizeCapped(t *testing.T) {
+	var calls atomic.Int32
+	c, _ := newUpstreamClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		p, _ := strconv.Atoi(r.URL.Query().Get("p"))
+		var items []any
+		for id := (p-1)*20 + 1; id <= min(p*20, 30); id++ {
+			items = append(items, map[string]any{"id": id, "name": fmt.Sprintf("tok-%d", id)})
+		}
+		ok(w, map[string]any{"page": p, "page_size": 20, "total": 30, "items": items})
+	})
+	tokens, err := c.Tokens(context.Background())
+	require.NoError(t, err)
+	require.Len(t, tokens, 30)
+	require.Equal(t, int64(30), tokens[29].ID)
+	require.Equal(t, int32(2), calls.Load(), "拉够 total 就停，不多翻一页")
+}
+
+func TestTokensStopRule(t *testing.T) {
+	for name, tc := range map[string]struct {
+		total any // nil 表示不返回 total
+		calls int32
+	}{
+		"total 偏大时翻到空页为止":   {total: 5, calls: 2},
+		"没有 total 时不满一页就结束": {total: nil, calls: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			c, _ := newUpstreamClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var items []any // 第 2 页起 items 是 null
+				if r.URL.Query().Get("p") == "1" {
+					items = []any{map[string]any{"id": 1, "name": "a"}, map[string]any{"id": 2, "name": "b"}}
+				}
+				data := map[string]any{"page": 1, "items": items}
+				if tc.total != nil {
+					data["total"] = tc.total
+				}
+				ok(w, data)
+			})
+			tokens, err := c.Tokens(context.Background())
+			require.NoError(t, err)
+			require.Len(t, tokens, 2)
+			require.Equal(t, tc.calls, calls.Load())
+		})
+	}
 }
 
 func TestLogsPageParsesFieldsLeniently(t *testing.T) {

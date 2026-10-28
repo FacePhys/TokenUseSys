@@ -15,7 +15,7 @@ import (
 
 var _ port.Upstream = (*Client)(nil)
 
-// maxTokenPages 防止 total 异常时无限翻页：100 页即 1 万个令牌。
+// maxTokenPages 防止翻页停不下来（比如上游忽略 p，每页内容都一样）：每页 100 条时即 1 万个令牌。
 const maxTokenPages = 100
 
 // Currency 返回 /api/status 的换算参数（§4.1）。
@@ -49,13 +49,14 @@ func (c *Client) Account(ctx context.Context) (usage.Account, error) {
 }
 
 // Tokens 按页拉全部令牌。完整 key 只在这里读一次，转成 key_hint，不出这个包（§8）。
+// 翻页规则同日志（§4.3、§4.4）：某页为空，或某页不满 100 条且已拉到的条数不少于 total 时结束。
 func (c *Client) Tokens(ctx context.Context) ([]usage.Token, error) {
 	r := c.reader("/api/token/")
 	defer r.warn()
 	var tokens []usage.Token
 	for p := 1; p <= maxTokenPages; p++ {
 		q := url.Values{"p": {strconv.Itoa(p)}, "page_size": {strconv.Itoa(usage.PageSize)}}
-		items, _, err := c.page(ctx, "/api/token/", q)
+		items, total, err := c.page(ctx, "/api/token/", q)
 		if err != nil {
 			return tokens, err
 		}
@@ -79,7 +80,9 @@ func (c *Client) Tokens(ctx context.Context) ([]usage.Token, error) {
 				ModelLimits:  limits,
 			})
 		}
-		if len(items) < usage.PageSize {
+		// 不满一页不一定是最后一页：上游把 page_size 压到 100 以下时，只看这一条会漏掉后面的令牌，
+		// 调用方还会把它们标成已删除。拉到的条数比 total 少就接着翻；total 只做参考，某页为空就结束。
+		if len(items) == 0 || (len(items) < usage.PageSize && int64(len(tokens)) >= total) {
 			return tokens, nil
 		}
 	}
