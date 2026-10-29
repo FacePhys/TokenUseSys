@@ -3,8 +3,8 @@
 import {
   $, METRICS, api, axisStyle, baseOption, carryQuery, clearError, colorPlan, compact, dateOnly, dateTime, daysBetween, el,
   formatMetric, int, lineValues, logout, metricName, metricOf, money, mountChart, nameSlot, onThemeChange, palette, pct,
-  rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table, tokenSlotOrder,
-  tooltipNode, writeParams,
+  rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table, tokenColorPlan,
+  tokenSlotOrder, tooltipNode, writeParams,
 } from './app.js';
 
 const TOP_MODELS = 5; // 饼图单独显示的模型数，其余合并为「其他」
@@ -84,12 +84,11 @@ function setRange(start, end) {
 function render() {
   if (!state.token) return;
   const pal = palette();
-  // 令牌颜色和总览页同一区间里的一致：总览页给前 5 名定色位（见 colorPlan），不在前 5 名的用它的首选色位。
-  const order = tokenSlotOrder(state.tokens.items);
+  // 令牌颜色和总览页同一区间里的一致（见 tokenColorPlan）。不在前几名的在总览是灰色，这里只画它一条线，用它的首选色位。
   const used = state.tokens.items.filter((t) => t.usage.requests > 0)
     .sort((a, b) => b.usage.amount - a.usage.amount || a.id - b.id).map((t) => t.id);
-  const plan = colorPlan(used.slice(0, TOP_MODELS), order, { circular: used.length <= TOP_MODELS });
-  const color = pal.series[plan.slots.has(id) ? plan.slots.get(id) : order(id) % 8];
+  const plan = tokenColorPlan(used, state.tokens.items);
+  const color = pal.series[plan.slots.has(id) ? plan.slots.get(id) : tokenSlotOrder(state.tokens.items)(id) % 8];
   const items = state.models.items; // 已按金额排序
   const mplan = colorPlan(items.slice(0, TOP_MODELS).map((m) => m.model), nameSlot, { circular: items.length <= TOP_MODELS });
   const modelColor = (name) => (mplan.slots.has(name) ? pal.series[mplan.slots.get(name)] : pal.other);

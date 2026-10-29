@@ -275,7 +275,7 @@ func bucketName(b port.Bucket) string {
 }
 
 // Series 返回按天（或按小时）的用量序列，按令牌拆分（§6）：区间内金额前 top 名各一条，其余合并为「其他」；
-// tokenID 非空时只返回这个令牌。没有数据的时间段补 0。
+// top 为 AllTop 时每个令牌各一条，按金额从高到低排。tokenID 非空时只返回这个令牌。没有数据的时间段补 0。
 func (s *Service) Series(ctx context.Context, r Range, bucket port.Bucket, top int, tokenID *int64) (Series, error) {
 	if bucket == port.BucketHour && r.Days() > MaxHourSeriesDays {
 		return Series{}, invalid("按小时查看时日期区间最长 %d 天", MaxHourSeriesDays)
@@ -283,8 +283,8 @@ func (s *Service) Series(ctx context.Context, r Range, bucket port.Bucket, top i
 	if top == 0 {
 		top = DefaultTop
 	}
-	if top < 1 || top > MaxTop {
-		return Series{}, invalid("top 必须在 1～%d 之间", MaxTop)
+	if top != AllTop && (top < 1 || top > MaxTop) {
+		return Series{}, invalid("top 必须在 1～%d 之间，或者是 all", MaxTop)
 	}
 	cur, code, err := s.currency(ctx)
 	if err != nil {
@@ -327,7 +327,7 @@ func (s *Service) Series(ctx context.Context, r Range, bucket port.Bucket, top i
 	}
 	lines := map[int64]*SeriesLine{}
 	for i, id := range ranked {
-		if i == top && tokenID == nil {
+		if i == top && top != AllTop && tokenID == nil {
 			break
 		}
 		lines[id] = newLine(&id, names.of(id), n)

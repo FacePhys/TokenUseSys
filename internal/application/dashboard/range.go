@@ -20,6 +20,9 @@ const (
 	MaxLogPageSize     = 100
 )
 
+// AllTop 表示不限名次：每个令牌单独一条，不合并「其他」（接口参数 top=all）。
+const AllTop = -1
+
 var (
 	// ErrInvalidArgument 表示请求参数不合法，接口返回 400。
 	ErrInvalidArgument = errors.New("参数错误")

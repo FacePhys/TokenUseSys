@@ -220,6 +220,18 @@ func TestSeriesByDay(t *testing.T) {
 	require.Len(t, s.Series, 4)
 	require.Equal(t, UnattributedName, s.Series[3].Name)
 
+	// top=all：每个令牌各一条（已删除的、未归属的也单独一条），不合并「其他」，按金额从高到低。
+	all, err := f.svc.Series(context.Background(), r, port.BucketDay, AllTop, nil)
+	require.NoError(t, err)
+	var names []string
+	for _, line := range all.Series {
+		require.NotNil(t, line.TokenID, "不合并「其他」")
+		names = append(names, line.Name)
+	}
+	require.Equal(t, []string{"prod", "dev", "old", UnattributedName}, names)
+	_, err = f.svc.Series(context.Background(), r, port.BucketDay, -2, nil)
+	require.ErrorIs(t, err, ErrInvalidArgument, "AllTop 以外的负数不合法")
+
 	tok := int64(2)
 	s, err = f.svc.Series(context.Background(), r, port.BucketDay, 0, &tok)
 	require.NoError(t, err)

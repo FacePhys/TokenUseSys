@@ -293,6 +293,11 @@ func TestAPIResponsesAndErrors(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"buckets":["2026-10-25","2026-10-26"]`)
 	require.Contains(t, w.Body.String(), `"name":"其他"`)
+	w = e.do(e.r, http.MethodGet, "/api/v1/usage/series?start=2026-10-25&end=2026-10-26&top=all", "", c)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, w.Body.String(), `"name":"其他"`, "top=all 时每个令牌单独一条")
+	w = e.do(e.r, http.MethodGet, "/api/v1/usage/series?top=-1", "", c)
+	require.Equal(t, http.StatusBadRequest, w.Code, "负数不能当成 all")
 
 	w = e.do(e.r, http.MethodGet, "/api/v1/tokens/1/logs?page_size=1", "", c)
 	require.Equal(t, http.StatusOK, w.Code)

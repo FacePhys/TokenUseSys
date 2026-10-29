@@ -374,32 +374,41 @@ export function assignSlots(keys, preferred) {
   return slots;
 }
 
-/** 在所有排列里找相邻颜色都分得清的顺序（最多 5 个，120 种），同样好时尽量保持原顺序。 */
+/**
+ * 找相邻颜色都分得清的顺序，同样好时尽量保持原顺序（代价 = 不合格的相邻对 × 1000 + 偏离原名次的总步数）。
+ * 按原顺序回溯搜索、代价不可能更小的分支直接剪掉：最多 8 个（40320 种排列）也只走很少几步。
+ */
 function arrange(keys, slots, circular) {
+  const rank = new Map(keys.map((k, i) => [k, i]));
+  const order = [];
+  const taken = new Set();
   let best = null;
-  const score = (arr) => {
-    let bad = 0;
-    for (let i = 0; i + 1 < arr.length; i++) if (badPair(slots.get(arr[i]), slots.get(arr[i + 1]))) bad++;
-    if (circular && arr.length > 2 && badPair(slots.get(arr[arr.length - 1]), slots.get(arr[0]))) bad++;
-    const drift = arr.reduce((sum, k, i) => sum + Math.abs(i - keys.indexOf(k)), 0);
-    if (!best || bad * 1000 + drift < best.bad * 1000 + best.drift) best = { order: arr.slice(), bad, drift };
-  };
-  const permute = (arr, l) => {
-    if (l === arr.length) return score(arr);
-    for (let i = l; i < arr.length; i++) {
-      [arr[l], arr[i]] = [arr[i], arr[l]];
-      permute(arr, l + 1);
-      [arr[l], arr[i]] = [arr[i], arr[l]];
+  const cost = (bad, drift) => bad * 1000 + drift;
+  const visit = (bad, drift) => {
+    if (best && cost(bad, drift) >= cost(best.bad, best.drift)) return;
+    if (order.length === keys.length) {
+      if (circular && keys.length > 2 && badPair(slots.get(order[order.length - 1]), slots.get(order[0]))) bad++;
+      if (!best || cost(bad, drift) < cost(best.bad, best.drift)) best = { order: order.slice(), bad, drift };
+      return;
+    }
+    for (const k of keys) {
+      if (taken.has(k)) continue;
+      const b = order.length > 0 && badPair(slots.get(order[order.length - 1]), slots.get(k)) ? 1 : 0;
+      taken.add(k);
+      order.push(k);
+      visit(bad + b, drift + Math.abs(order.length - 1 - rank.get(k)));
+      order.pop();
+      taken.delete(k);
     }
   };
-  permute(keys.slice(), 0);
+  visit(0, 0);
   return best || { order: [], bad: 0 };
 }
 
 /**
- * 给一个视图里要着色的实体（最多 5 个，按名次排好）定色位和排列顺序（堆叠、图例、饼图共用）：
+ * 给一个视图里要着色的实体（最多 8 个，按名次排好）定色位和排列顺序（堆叠、图例、饼图共用）：
  * 先按首选色位分配，再找相邻都分得清的顺序；找不到时改用色板前几位按名次排（色板相邻顺序已校验过）。
- * circular 为真时首尾也算相邻（饼图没有「其他」块时）。「其他」用灰色，放在最后，和谁相邻都可以。
+ * circular 为真时首尾也算相邻（饼图里没有灰色块隔开时）。灰色的放在最后，和谁相邻都可以。
  */
 export function colorPlan(keys, preferred, { circular = false } = {}) {
   let slots = assignSlots(keys, preferred);
@@ -409,6 +418,18 @@ export function colorPlan(keys, preferred, { circular = false } = {}) {
     best = { order: keys.slice() };
   }
   return { slots, order: best.order };
+}
+
+/**
+ * 区间内消费前几名的令牌用色板着色。色板只有 8 色，dataviz 规定不循环、不生成新色，其余令牌用灰色，
+ * 但每个令牌仍单独一段 / 一块（不合并成「其他」），靠图例、悬停提示和表格认出是哪个。
+ */
+export const COLORED_TOKENS = 8;
+
+/** 令牌的配色方案（总览和详情页共用，同一区间里颜色一致）：rankedIds 按区间消费从高到低，前 COLORED_TOKENS 个着色。 */
+export function tokenColorPlan(rankedIds, tokens) {
+  return colorPlan(rankedIds.slice(0, COLORED_TOKENS), tokenSlotOrder(tokens),
+    { circular: rankedIds.length <= COLORED_TOKENS });
 }
 
 // ---- 图表 ----
@@ -443,15 +464,21 @@ export function axisStyle(pal) {
   };
 }
 
-/** 悬停提示：数值在前（加粗）、名称在后，每行用一条短线标识序列颜色。 */
-export function tooltipNode(title, rows, total) {
+// 悬停提示一列最多放几行，行多时分几列排，提示框不会比图还高。
+const TIP_ROWS_PER_COLUMN = 12;
+
+/**
+ * 悬停提示：数值在前（加粗）、名称在后，每行用一条短线标识序列颜色。
+ * 行多时分成最多 maxColumns 列，先从上到下、再从左到右。
+ */
+export function tooltipNode(title, rows, total, maxColumns = 1) {
   const root = el('div', { class: 'tip' }, el('div', { class: 'tip-title', text: title }));
-  for (const r of rows) {
-    root.append(el('div', { class: 'tip-row' },
+  const columns = Math.max(1, Math.min(maxColumns, Math.ceil(rows.length / TIP_ROWS_PER_COLUMN)));
+  root.append(el('div', { class: 'tip-rows', style: { gridTemplateRows: `repeat(${Math.ceil(rows.length / columns)}, auto)` } },
+    rows.map((r) => el('div', { class: 'tip-row' },
       r.color ? el('span', { class: 'tip-key', style: { background: r.color } }) : null,
       el('span', { class: 'tip-value', text: r.value }),
-      el('span', { class: 'tip-name', text: r.name })));
-  }
+      el('span', { class: 'tip-name', text: r.name })))));
   if (total) {
     root.append(el('div', { class: 'tip-row tip-total' },
       el('span', { class: 'tip-value', text: total.value }), el('span', { class: 'tip-name', text: total.name })));

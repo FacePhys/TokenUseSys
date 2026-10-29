@@ -477,6 +477,14 @@ button, input, select {
 .legend-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
 .legend-table th, .legend-table td { padding: 7px 6px; }
 
+/* 「按令牌」时图例表列出全部令牌：超过 6 行左右在表内滚动、表头不动，卡片和以前（最多 6 块）一样高。 */
+.pie-card .legend-table { max-height: 232px; overflow-y: auto; }
+.legend-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+}
+
 /* 卡片窄时（总览右栏）环形图和图例上下排，名称和数值都放得下。 */
 .pie-card { container-type: inline-size; }
 
@@ -491,6 +499,15 @@ button, input, select {
   min-width: 4em;
   max-width: 120px;
   vertical-align: bottom;
+}
+
+/* 每个令牌一列，令牌多时表格很宽：横向滚动时日期列固定在左边。 */
+.matrix th:first-child,
+.matrix td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-1);
 }
 
 /* ---- 表格 ---- */
@@ -592,6 +609,13 @@ tfoot td {
 
 .tip { min-width: 160px; font: 12px/1.5 var(--font); }
 .tip-title { color: var(--text-secondary); margin-bottom: 4px; }
+
+/* 行数由脚本按列数算好（grid-template-rows），先从上到下、再从左到右排。 */
+.tip-rows {
+  display: grid;
+  grid-auto-flow: column;
+  column-gap: 16px;
+}
 
 .tip-row {
   display: flex;

@@ -104,7 +104,7 @@ func (h *handler) series(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	top, err := intQuery(c, "top")
+	top, err := topQuery(c)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -216,6 +216,18 @@ func tokenIDQuery(c *gin.Context) (*int64, error) {
 		return nil, fmt.Errorf("%w：token_id 必须是非负整数", dashboard.ErrInvalidArgument)
 	}
 	return &id, nil
+}
+
+// topQuery 解析 top：all 表示每个令牌单独一条、不合并「其他」；省略时返回 0，由查询层取默认值。
+func topQuery(c *gin.Context) (int, error) {
+	if c.Query("top") == "all" {
+		return dashboard.AllTop, nil
+	}
+	n, err := intQuery(c, "top")
+	if err == nil && n < 0 {
+		err = fmt.Errorf("%w：top 必须是正整数或 all", dashboard.ErrInvalidArgument)
+	}
+	return n, err
 }
 
 // intQuery 解析可选的整数参数，没有时返回 0，由查询层取默认值。
