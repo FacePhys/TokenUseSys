@@ -607,20 +607,6 @@ tfoot td {
 .tip { min-width: 160px; font: 12px/1.5 var(--font); }
 .tip-title { color: var(--text-secondary); margin-bottom: 4px; }
 
-/* 行数由脚本按列数算好（grid-template-rows），先从上到下、再从左到右排。 */
-.tip-rows {
-  display: grid;
-  grid-auto-flow: column;
-  column-gap: 16px;
-}
-
-/* 合计下面的明细（「其他」里的每个令牌），用细线和上面隔开。 */
-.tip-detail {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--grid);
-}
-
 .tip-row {
   display: flex;
   align-items: center;

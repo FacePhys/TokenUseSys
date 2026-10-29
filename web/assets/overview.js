@@ -1,14 +1,14 @@
 // 总览页（开发文档 §7）：指标卡、同步状态、按天柱状图（可切成表格）、占比饼图、令牌表。
 // 日期区间和指标在同一行，作用于下面全部内容；所有数字都从同一个区间汇总，彼此一致。
 import {
-  $, METRICS, api, axisStyle, badge, baseOption, carryQuery, clearError, clock, colorPlan, compact, daysBetween, el,
-  formatMetric, int, lineValues, logout, metricName, metricOf, money, mountChart, nameSlot, onThemeChange, palette, pct,
-  rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table, tokenColorPlan,
-  tooltipNode, writeParams, dateTime,
+  $, COLORED_TOKENS, METRICS, api, axisStyle, badge, baseOption, carryQuery, clearError, clock, colorPlan, compact,
+  daysBetween, el, formatMetric, int, lineValues, logout, metricName, metricOf, money, mountChart, nameSlot, onThemeChange,
+  palette, pct, rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table,
+  tokenColorPlan, tooltipNode, writeParams, dateTime,
 } from './app.js';
 
-// 柱状图和「按令牌」饼图单独显示区间内消费前 8 名令牌（色板正好 8 色，见 tokenColorPlan），其余合并为灰色的「其他」，
-// 悬停时在提示框里逐个列出；「按模型」饼图单独显示前 5 个模型，其余合并为「其他」。
+// 柱状图和「按令牌」饼图单独显示区间内消费前 8 名令牌（色板正好 8 色，见 tokenColorPlan），其余合并为灰色的「其他」；
+// 「按模型」饼图单独显示前 5 个模型，其余合并为「其他」。
 const TOP_MODELS = 5;
 const OTHERS = '其他';
 
@@ -71,7 +71,7 @@ async function load() {
     const [summary, tokens, series] = await Promise.all([
       api('/api/v1/summary'),
       api('/api/v1/tokens', q),
-      api('/api/v1/usage/series', { ...q, top: 'all' }),
+      api('/api/v1/usage/series', { ...q, top: COLORED_TOKENS }),
     ]);
     Object.assign(state, { summary, tokens, series });
     setTimeZone(summary.timezone);
@@ -112,8 +112,10 @@ function render() {
   if (!state.tokens) return;
   const pal = palette();
   // 令牌颜色跟着令牌走（按累计消费定首选色位），排列顺序保证相邻的颜色分得清；柱状图、饼图、令牌表用同一份。
-  // 区间内消费前 8 名着色，其余是灰色的「其他」（序列已按区间金额从高到低排）。
-  const plan = tokenColorPlan(state.series.series.map((l) => l.token_id), state.tokens.items);
+  // 接口已经把前 8 名以外合并成「其他」（token_id 为 null），前 8 名按区间金额从高到低排。
+  const lines = state.series.series;
+  const plan = tokenColorPlan(lines.filter((l) => l.token_id !== null).map((l) => l.token_id), state.tokens.items,
+    lines.some((l) => l.token_id === null));
   const colorOf = (id) => (plan.slots.has(id) ? pal.series[plan.slots.get(id)] : pal.other);
   renderFilters();
   renderStatus();
@@ -175,26 +177,10 @@ function renderKPIs() {
   );
 }
 
-// 图上的序列（从下往上堆叠，图例和表格同序）：前 8 名按颜色方案的顺序（相邻的颜色分得清），其余令牌合并成「其他」
-// 放在最上面。tail 是合并前的那些令牌（按区间金额从高到低），悬停时在提示框里逐个列出。
-function chartLines(plan) {
-  const all = state.series.series;
-  const byId = new Map(all.map((l) => [l.token_id, l]));
-  const tail = all.filter((l) => !plan.slots.has(l.token_id));
-  const lines = plan.order.map((id) => byId.get(id));
-  if (tail.length > 0) lines.push(mergeLines(tail));
-  return { lines, tail };
-}
-
-const LINE_FIELDS = ['amount', 'requests', 'prompt_tokens', 'completion_tokens', 'cache_read_tokens', 'cache_write_tokens'];
-
-// 把几条序列逐个时间段相加，合成「其他」（token_id 为 null，和接口里「其他」的写法一样）。
-function mergeLines(lines) {
-  const merged = { token_id: null, name: OTHERS };
-  for (const f of LINE_FIELDS) {
-    merged[f] = state.series.buckets.map((_, i) => lines.reduce((s, l) => s + l[f][i], 0));
-  }
-  return merged;
+// 序列按颜色方案的顺序排（相邻的颜色分得清），「其他」放在最上面。
+function orderedLines(plan) {
+  const byId = new Map(state.series.series.map((l) => [l.token_id, l]));
+  return [...plan.order.map((id) => byId.get(id)), ...(byId.has(null) ? [byId.get(null)] : [])];
 }
 
 function uniqueNames(lines) {
@@ -207,12 +193,10 @@ function renderBar(pal, plan, colorOf) {
   const { series } = state;
   const metric = state.params.metric;
   const cur = series.currency;
-  const { lines, tail } = chartLines(plan);
+  const lines = orderedLines(plan);
   const names = uniqueNames(lines);
   const values = lines.map((l) => lineValues(l, metric));
   const colors = lines.map((l) => (l.token_id === null ? pal.other : colorOf(l.token_id)));
-  const tailNames = uniqueNames(tail);
-  const tailValues = tail.map((l) => lineValues(l, metric));
   const n = series.buckets.length;
   // 每一列最上面的非零段才有 4px 圆角，底部是直角。
   const topOf = series.buckets.map((_, i) => {
@@ -220,7 +204,8 @@ function renderBar(pal, plan, colorOf) {
     return -1;
   });
   const empty = values.every((v) => v.every((x) => x === 0));
-  $('bar-sub').textContent = metricName(metric) + (tail.length > 0 ? ` · 「其他」是其余 ${tail.length} 个令牌，悬停查看明细` : '');
+  const merged = state.tokens.items.filter((t) => t.usage.requests > 0 && !plan.slots.has(t.id)).length;
+  $('bar-sub').textContent = metricName(metric) + (merged > 0 ? ` · 「其他」是其余 ${merged} 个令牌` : '');
 
   const axis = axisStyle(pal);
   barChart.setOption({
@@ -233,7 +218,7 @@ function renderBar(pal, plan, colorOf) {
       textStyle: { color: pal.text2, fontFamily: pal.font }, inactiveColor: pal.grid,
       pageIconColor: pal.text2, pageIconInactiveColor: pal.grid, pageTextStyle: { color: pal.muted, fontFamily: pal.font },
     } : { show: false },
-    // 悬停一天：前 8 名按数值从高到低，「其他」放最后；合计下面逐个列出「其他」里这天有用量的令牌，多时分几列。
+    // 悬停一天：前 8 名按数值从高到低，「其他」放最后，再加合计。
     tooltip: {
       ...baseOption(pal).tooltip,
       trigger: 'axis',
@@ -244,12 +229,9 @@ function renderBar(pal, plan, colorOf) {
         const ks = lines.map((_, k) => k).filter((k) => values[k][i] > 0);
         const rows = [...ks.filter((k) => lines[k].token_id !== null).sort((a, b) => values[b][i] - values[a][i]),
           ...ks.filter((k) => lines[k].token_id === null)].map(row);
-        const members = tail.map((_, j) => j).filter((j) => tailValues[j][i] > 0).sort((a, b) => tailValues[b][i] - tailValues[a][i])
-          .map((j) => ({ value: formatMetric(tailValues[j][i], metric, cur), name: tailNames[j] }));
         const total = values.reduce((s, v) => s + v[i], 0);
         return tooltipNode(series.buckets[i], rows.length ? rows : [{ value: '无用量', name: '' }],
-          { value: formatMetric(total, metric, cur), name: '合计' }, 1,
-          { title: `「其他」明细（${members.length} 个令牌）`, rows: members, maxColumns: Math.max(1, Math.floor(barChart.getWidth() / 200)) });
+          { value: formatMetric(total, metric, cur), name: '合计' });
       },
     },
     xAxis: {
@@ -335,19 +317,15 @@ function renderPie(pal, plan, colorOf) {
   let rows;
   let total;
   if (state.pieMode === 'token') {
-    // 和柱状图同一批令牌、同一套颜色和顺序；块的大小按当前指标。其余令牌合并成「其他」（实际相加，不用合计相减），
-    // 悬停「其他」时逐个列出里面的令牌在这个区间的用量。
+    // 和柱状图同一批令牌、同一套颜色和顺序；块的大小按当前指标。「其他」是其余令牌实际相加，不用合计相减。
     const byId = new Map(state.tokens.items.map((t) => [t.id, t]));
     total = metricOf(state.tokens.total, metric);
     rows = plan.order.map((id) => {
       const item = byId.get(id);
       return { id, name: item ? item.name : `#${id}`, value: item ? metricOf(item.usage, metric) : 0, color: colorOf(id) };
     });
-    const members = state.tokens.items.filter((t) => !plan.slots.has(t.id))
-      .map((t) => ({ name: t.name, value: metricOf(t.usage, metric) })).filter((m) => m.value > 0)
-      .sort((a, b) => b.value - a.value);
-    const rest = members.reduce((s, m) => s + m.value, 0);
-    if (rest > 0) rows.push({ name: OTHERS, value: rest, color: pal.other, members });
+    const rest = state.tokens.items.filter((t) => !plan.slots.has(t.id)).reduce((s, t) => s + metricOf(t.usage, metric), 0);
+    if (rest > 0) rows.push({ name: OTHERS, value: rest, color: pal.other });
   } else {
     const items = state.models.items; // 已按金额排序
     total = metricOf(state.models.total, metric);
@@ -369,12 +347,7 @@ function renderPie(pal, plan, colorOf) {
     tooltip: {
       ...baseOption(pal).tooltip,
       trigger: 'item',
-      formatter: (p) => {
-        const r = rows[p.dataIndex];
-        return tooltipNode(p.name, [{ color: r.color, value: f(p.value), name: pct(p.value / total) }], null, 1,
-          r.members && { title: `「其他」明细（${r.members.length} 个令牌）`, rows: r.members.map((m) => ({ value: f(m.value), name: m.name })),
-            maxColumns: Math.max(1, Math.floor(pieChart.getWidth() / 200)) });
-      },
+      formatter: (p) => tooltipNode(p.name, [{ color: rows[p.dataIndex].color, value: f(p.value), name: pct(p.value / total) }]),
     },
     graphic: [{
       type: 'group', left: 'center', top: 'middle',

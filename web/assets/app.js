@@ -422,14 +422,16 @@ export function colorPlan(keys, preferred, { circular = false } = {}) {
 
 /**
  * 区间内消费前几名的令牌单独显示、各用一种颜色。色板正好 8 色，dataviz 规定不循环、不生成新色，
- * 其余令牌合并成灰色的「其他」，悬停时在提示框里逐个列出。
+ * 其余令牌合并成灰色的「其他」。
  */
 export const COLORED_TOKENS = 8;
 
-/** 令牌的配色方案（总览和详情页共用，同一区间里颜色一致）：rankedIds 按区间消费从高到低，前 COLORED_TOKENS 个着色。 */
-export function tokenColorPlan(rankedIds, tokens) {
-  return colorPlan(rankedIds.slice(0, COLORED_TOKENS), tokenSlotOrder(tokens),
-    { circular: rankedIds.length <= COLORED_TOKENS });
+/**
+ * 令牌的配色方案（总览和详情页共用，同一区间里颜色一致）：rankedIds 按区间消费从高到低，前 COLORED_TOKENS 个着色。
+ * more 表示前几名之外还有令牌（合并成「其他」，饼图里把首尾两块隔开）；只传了前几名时由调用方告诉它。
+ */
+export function tokenColorPlan(rankedIds, tokens, more = rankedIds.length > COLORED_TOKENS) {
+  return colorPlan(rankedIds.slice(0, COLORED_TOKENS), tokenSlotOrder(tokens), { circular: !more });
 }
 
 // ---- 图表 ----
@@ -464,34 +466,20 @@ export function axisStyle(pal) {
   };
 }
 
-// 悬停提示一列最多放几行，行多时分几列排，提示框不会比图还高。
-const TIP_ROWS_PER_COLUMN = 12;
-
-/**
- * 悬停提示：数值在前（加粗）、名称在后，每行用一条短线标识序列颜色。行多时分成最多 maxColumns 列。
- * detail（可选）接在合计下面，比如「其他」里每个令牌的明细：{ title, rows, maxColumns }。
- */
-export function tooltipNode(title, rows, total, maxColumns = 1, detail = null) {
-  const root = el('div', { class: 'tip' }, el('div', { class: 'tip-title', text: title }), tipRows(rows, maxColumns));
+/** 悬停提示：数值在前（加粗）、名称在后，每行用一条短线标识序列颜色。 */
+export function tooltipNode(title, rows, total) {
+  const root = el('div', { class: 'tip' }, el('div', { class: 'tip-title', text: title }));
+  for (const r of rows) {
+    root.append(el('div', { class: 'tip-row' },
+      r.color ? el('span', { class: 'tip-key', style: { background: r.color } }) : null,
+      el('span', { class: 'tip-value', text: r.value }),
+      el('span', { class: 'tip-name', text: r.name })));
+  }
   if (total) {
     root.append(el('div', { class: 'tip-row tip-total' },
       el('span', { class: 'tip-value', text: total.value }), el('span', { class: 'tip-name', text: total.name })));
   }
-  if (detail && detail.rows.length > 0) {
-    root.append(el('div', { class: 'tip-detail' }, el('div', { class: 'tip-title', text: detail.title }),
-      tipRows(detail.rows, detail.maxColumns)));
-  }
   return root;
-}
-
-// 提示框里的几行：先从上到下、再从左到右排，一列最多 TIP_ROWS_PER_COLUMN 行。
-function tipRows(rows, maxColumns) {
-  const columns = Math.max(1, Math.min(maxColumns, Math.ceil(rows.length / TIP_ROWS_PER_COLUMN)));
-  return el('div', { class: 'tip-rows', style: { gridTemplateRows: `repeat(${Math.ceil(rows.length / columns)}, auto)` } },
-    rows.map((r) => el('div', { class: 'tip-row' },
-      r.color ? el('span', { class: 'tip-key', style: { background: r.color } }) : null,
-      el('span', { class: 'tip-value', text: r.value }),
-      el('span', { class: 'tip-name', text: r.name }))));
 }
 
 /**
