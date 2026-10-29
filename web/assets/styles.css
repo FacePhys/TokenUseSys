@@ -450,6 +450,11 @@ button, input, select {
 .chart { width: 100%; height: 320px; }
 .chart.donut { height: 260px; }
 
+/* 按天柱状图和右边的占比卡片同一行、一样高：图表撑满卡片剩下的高度（至少 320px），下面不留一大块空白。
+   contain: size：ECharts 在容器里放了写死像素高度的画布，不让它反过来撑住这一行，否则图只会变高、不会变矮。 */
+.bar-card { display: flex; flex-direction: column; }
+.bar-card > .chart { flex: 1 1 0; height: auto; min-height: 320px; contain: size; }
+
 .loading .chart,
 .loading .table-wrap,
 .loading .kpis,
@@ -477,14 +482,6 @@ button, input, select {
 .legend-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
 .legend-table th, .legend-table td { padding: 7px 6px; }
 
-/* 「按令牌」时图例表列出全部令牌：超过 6 行左右在表内滚动、表头不动，卡片和以前（最多 6 块）一样高。 */
-.pie-card .legend-table { max-height: 232px; overflow-y: auto; }
-.legend-table thead th {
-  position: sticky;
-  top: 0;
-  background: var(--surface-1);
-}
-
 /* 卡片窄时（总览右栏）环形图和图例上下排，名称和数值都放得下。 */
 .pie-card { container-type: inline-size; }
 
@@ -501,7 +498,7 @@ button, input, select {
   vertical-align: bottom;
 }
 
-/* 每个令牌一列，令牌多时表格很宽：横向滚动时日期列固定在左边。 */
+/* 表格比卡片宽时（窄屏、令牌名长）横向滚动，日期列固定在左边。 */
 .matrix th:first-child,
 .matrix td:first-child {
   position: sticky;
@@ -615,6 +612,13 @@ tfoot td {
   display: grid;
   grid-auto-flow: column;
   column-gap: 16px;
+}
+
+/* 合计下面的明细（「其他」里的每个令牌），用细线和上面隔开。 */
+.tip-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--grid);
 }
 
 .tip-row {

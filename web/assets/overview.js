@@ -7,8 +7,10 @@ import {
   tooltipNode, writeParams, dateTime,
 } from './app.js';
 
-// 「按模型」饼图单独显示的模型数，其余合并为「其他」。令牌不合并：柱状图和「按令牌」饼图里每个令牌都单独一段 / 一块。
+// 柱状图和「按令牌」饼图单独显示区间内消费前 8 名令牌（色板正好 8 色，见 tokenColorPlan），其余合并为灰色的「其他」，
+// 悬停时在提示框里逐个列出；「按模型」饼图单独显示前 5 个模型，其余合并为「其他」。
 const TOP_MODELS = 5;
+const OTHERS = '其他';
 
 const state = {
   params: readParams(),
@@ -110,7 +112,7 @@ function render() {
   if (!state.tokens) return;
   const pal = palette();
   // 令牌颜色跟着令牌走（按累计消费定首选色位），排列顺序保证相邻的颜色分得清；柱状图、饼图、令牌表用同一份。
-  // 区间内消费前 8 名着色，其余灰色（序列已按区间金额从高到低排）。
+  // 区间内消费前 8 名着色，其余是灰色的「其他」（序列已按区间金额从高到低排）。
   const plan = tokenColorPlan(state.series.series.map((l) => l.token_id), state.tokens.items);
   const colorOf = (id) => (plan.slots.has(id) ? pal.series[plan.slots.get(id)] : pal.other);
   renderFilters();
@@ -173,28 +175,44 @@ function renderKPIs() {
   );
 }
 
-// 堆叠顺序（从下往上，图例和表格同序）：着色的令牌按颜色方案的顺序（相邻的颜色分得清），
-// 灰色的令牌按区间金额从高到低接在上面。换指标时顺序不变，每个令牌的位置不跳。
-function orderedLines(plan) {
-  const lines = state.series.series;
-  const byId = new Map(lines.map((l) => [l.token_id, l]));
-  return [...plan.order.map((id) => byId.get(id)), ...lines.filter((l) => !plan.slots.has(l.token_id))];
+// 图上的序列（从下往上堆叠，图例和表格同序）：前 8 名按颜色方案的顺序（相邻的颜色分得清），其余令牌合并成「其他」
+// 放在最上面。tail 是合并前的那些令牌（按区间金额从高到低），悬停时在提示框里逐个列出。
+function chartLines(plan) {
+  const all = state.series.series;
+  const byId = new Map(all.map((l) => [l.token_id, l]));
+  const tail = all.filter((l) => !plan.slots.has(l.token_id));
+  const lines = plan.order.map((id) => byId.get(id));
+  if (tail.length > 0) lines.push(mergeLines(tail));
+  return { lines, tail };
+}
+
+const LINE_FIELDS = ['amount', 'requests', 'prompt_tokens', 'completion_tokens', 'cache_read_tokens', 'cache_write_tokens'];
+
+// 把几条序列逐个时间段相加，合成「其他」（token_id 为 null，和接口里「其他」的写法一样）。
+function mergeLines(lines) {
+  const merged = { token_id: null, name: OTHERS };
+  for (const f of LINE_FIELDS) {
+    merged[f] = state.series.buckets.map((_, i) => lines.reduce((s, l) => s + l[f][i], 0));
+  }
+  return merged;
 }
 
 function uniqueNames(lines) {
   const seen = new Map();
   for (const l of lines) seen.set(l.name, (seen.get(l.name) || 0) + 1);
-  return lines.map((l) => (seen.get(l.name) > 1 ? `${l.name} #${l.token_id}` : l.name));
+  return lines.map((l) => (seen.get(l.name) > 1 && l.token_id !== null ? `${l.name} #${l.token_id}` : l.name));
 }
 
 function renderBar(pal, plan, colorOf) {
   const { series } = state;
   const metric = state.params.metric;
   const cur = series.currency;
-  const lines = orderedLines(plan);
+  const { lines, tail } = chartLines(plan);
   const names = uniqueNames(lines);
   const values = lines.map((l) => lineValues(l, metric));
-  const colors = lines.map((l) => colorOf(l.token_id));
+  const colors = lines.map((l) => (l.token_id === null ? pal.other : colorOf(l.token_id)));
+  const tailNames = uniqueNames(tail);
+  const tailValues = tail.map((l) => lineValues(l, metric));
   const n = series.buckets.length;
   // 每一列最上面的非零段才有 4px 圆角，底部是直角。
   const topOf = series.buckets.map((_, i) => {
@@ -202,36 +220,36 @@ function renderBar(pal, plan, colorOf) {
     return -1;
   });
   const empty = values.every((v) => v.every((x) => x === 0));
-  const colored = plan.order.length; // orderedLines 把着色的令牌排在前面
-  const gray = lines.length - colored;
-  $('bar-sub').textContent = metricName(metric) + (gray > 0 ? ` · 灰色是其余 ${gray} 个令牌，悬停柱子或切到「表」查看` : '');
+  $('bar-sub').textContent = metricName(metric) + (tail.length > 0 ? ` · 「其他」是其余 ${tail.length} 个令牌，悬停查看明细` : '');
 
   const axis = axisStyle(pal);
   barChart.setOption({
     ...baseOption(pal),
     color: colors,
     grid: { left: 4, right: 12, top: 36, bottom: 4, containLabel: true },
-    // 图例只列着色的令牌：灰色的色块都一样，列进图例也认不出，靠副标题、悬停提示和表格。
     // 名字长时一行放不下，翻页查看；点图例可以隐藏 / 显示某个令牌。
     legend: lines.length > 1 ? {
       type: 'scroll', top: 0, left: 0, right: 0, icon: 'rect', itemWidth: 10, itemHeight: 10, itemGap: 14,
-      data: names.slice(0, colored),
       textStyle: { color: pal.text2, fontFamily: pal.font }, inactiveColor: pal.grid,
       pageIconColor: pal.text2, pageIconInactiveColor: pal.grid, pageTextStyle: { color: pal.muted, fontFamily: pal.font },
     } : { show: false },
-    // 悬停一天：列出这天每个有用量的令牌，按数值从高到低；令牌多时分几列，每列约 200px 宽。
+    // 悬停一天：前 8 名按数值从高到低，「其他」放最后；合计下面逐个列出「其他」里这天有用量的令牌，多时分几列。
     tooltip: {
       ...baseOption(pal).tooltip,
       trigger: 'axis',
       axisPointer: { type: 'shadow', shadowStyle: { color: pal.hover } },
       formatter: (params) => {
         const i = params[0].dataIndex;
-        const rows = lines.map((l, k) => ({ k, v: values[k][i] })).filter((r) => r.v > 0).sort((a, b) => b.v - a.v)
-          .map((r) => ({ color: colors[r.k], value: formatMetric(r.v, metric, cur), name: names[r.k] }));
+        const row = (k) => ({ color: colors[k], value: formatMetric(values[k][i], metric, cur), name: names[k] });
+        const ks = lines.map((_, k) => k).filter((k) => values[k][i] > 0);
+        const rows = [...ks.filter((k) => lines[k].token_id !== null).sort((a, b) => values[b][i] - values[a][i]),
+          ...ks.filter((k) => lines[k].token_id === null)].map(row);
+        const members = tail.map((_, j) => j).filter((j) => tailValues[j][i] > 0).sort((a, b) => tailValues[b][i] - tailValues[a][i])
+          .map((j) => ({ value: formatMetric(tailValues[j][i], metric, cur), name: tailNames[j] }));
         const total = values.reduce((s, v) => s + v[i], 0);
         return tooltipNode(series.buckets[i], rows.length ? rows : [{ value: '无用量', name: '' }],
-          { value: formatMetric(total, metric, cur), name: rows.length > 1 ? `合计（${rows.length} 个令牌）` : '合计' },
-          Math.max(1, Math.floor(barChart.getWidth() / 200)));
+          { value: formatMetric(total, metric, cur), name: '合计' }, 1,
+          { title: `「其他」明细（${members.length} 个令牌）`, rows: members, maxColumns: Math.max(1, Math.floor(barChart.getWidth() / 200)) });
       },
     },
     xAxis: {
@@ -260,7 +278,7 @@ function renderBar(pal, plan, colorOf) {
   renderBarView();
 }
 
-// 按天明细表每个令牌一列，令牌多时有上千个单元格。看图时等浏览器空闲再建，不拖慢重画；
+// 按天明细表一天一行，区间长时（最长 400 天）有几千个单元格。看图时等浏览器空闲再建，不拖慢重画；
 // 正在看表、或者切到表时还没建好，就马上建。
 function scheduleBarTable(build) {
   if (barTableJob) cancelIdle(barTableJob.id);
@@ -317,16 +335,19 @@ function renderPie(pal, plan, colorOf) {
   let rows;
   let total;
   if (state.pieMode === 'token') {
-    // 每个令牌单独一块，不合并「其他」：着色的令牌和柱状图同一批、同一套颜色和顺序，灰色的按当前指标从高到低接在后面。
+    // 和柱状图同一批令牌、同一套颜色和顺序；块的大小按当前指标。其余令牌合并成「其他」（实际相加，不用合计相减），
+    // 悬停「其他」时逐个列出里面的令牌在这个区间的用量。
     const byId = new Map(state.tokens.items.map((t) => [t.id, t]));
     total = metricOf(state.tokens.total, metric);
-    const row = (id) => {
+    rows = plan.order.map((id) => {
       const item = byId.get(id);
       return { id, name: item ? item.name : `#${id}`, value: item ? metricOf(item.usage, metric) : 0, color: colorOf(id) };
-    };
-    const tail = state.tokens.items.filter((t) => !plan.slots.has(t.id)).map((t) => row(t.id))
-      .sort((a, b) => b.value - a.value || a.id - b.id);
-    rows = [...plan.order.map(row), ...tail];
+    });
+    const members = state.tokens.items.filter((t) => !plan.slots.has(t.id))
+      .map((t) => ({ name: t.name, value: metricOf(t.usage, metric) })).filter((m) => m.value > 0)
+      .sort((a, b) => b.value - a.value);
+    const rest = members.reduce((s, m) => s + m.value, 0);
+    if (rest > 0) rows.push({ name: OTHERS, value: rest, color: pal.other, members });
   } else {
     const items = state.models.items; // 已按金额排序
     total = metricOf(state.models.total, metric);
@@ -337,7 +358,7 @@ function renderPie(pal, plan, colorOf) {
       color: pal.series[mplan.slots.get(name)] }));
     // 模型的「其他」是其余模型实际相加，不用合计相减。
     const rest = items.slice(TOP_MODELS).reduce((s, m) => s + metricOf(m, metric), 0);
-    if (rest > 0) rows.push({ name: '其他', value: rest, color: pal.other });
+    if (rest > 0) rows.push({ name: OTHERS, value: rest, color: pal.other });
   }
   rows = rows.filter((r) => r.value > 0);
   pieRows = rows;
@@ -348,7 +369,12 @@ function renderPie(pal, plan, colorOf) {
     tooltip: {
       ...baseOption(pal).tooltip,
       trigger: 'item',
-      formatter: (p) => tooltipNode(p.name, [{ color: rows[p.dataIndex].color, value: f(p.value), name: pct(p.value / total) }]),
+      formatter: (p) => {
+        const r = rows[p.dataIndex];
+        return tooltipNode(p.name, [{ color: r.color, value: f(p.value), name: pct(p.value / total) }], null, 1,
+          r.members && { title: `「其他」明细（${r.members.length} 个令牌）`, rows: r.members.map((m) => ({ value: f(m.value), name: m.name })),
+            maxColumns: Math.max(1, Math.floor(pieChart.getWidth() / 200)) });
+      },
     },
     graphic: [{
       type: 'group', left: 'center', top: 'middle',
@@ -367,7 +393,7 @@ function renderPie(pal, plan, colorOf) {
     }],
   }, true);
 
-  // 图例兼表格视图：名称、数值、占比。按令牌时列出全部令牌（超出高度在表内滚动），点击进详情。
+  // 图例兼表格视图：名称、数值、占比。按令牌时点击进详情（「其他」不能点）。
   const clickable = state.pieMode === 'token';
   $('pie-legend').replaceChildren(table({
     columns: [

@@ -421,8 +421,8 @@ export function colorPlan(keys, preferred, { circular = false } = {}) {
 }
 
 /**
- * 区间内消费前几名的令牌用色板着色。色板只有 8 色，dataviz 规定不循环、不生成新色，其余令牌用灰色，
- * 但每个令牌仍单独一段 / 一块（不合并成「其他」），靠图例、悬停提示和表格认出是哪个。
+ * 区间内消费前几名的令牌单独显示、各用一种颜色。色板正好 8 色，dataviz 规定不循环、不生成新色，
+ * 其余令牌合并成灰色的「其他」，悬停时在提示框里逐个列出。
  */
 export const COLORED_TOKENS = 8;
 
@@ -468,22 +468,30 @@ export function axisStyle(pal) {
 const TIP_ROWS_PER_COLUMN = 12;
 
 /**
- * 悬停提示：数值在前（加粗）、名称在后，每行用一条短线标识序列颜色。
- * 行多时分成最多 maxColumns 列，先从上到下、再从左到右。
+ * 悬停提示：数值在前（加粗）、名称在后，每行用一条短线标识序列颜色。行多时分成最多 maxColumns 列。
+ * detail（可选）接在合计下面，比如「其他」里每个令牌的明细：{ title, rows, maxColumns }。
  */
-export function tooltipNode(title, rows, total, maxColumns = 1) {
-  const root = el('div', { class: 'tip' }, el('div', { class: 'tip-title', text: title }));
-  const columns = Math.max(1, Math.min(maxColumns, Math.ceil(rows.length / TIP_ROWS_PER_COLUMN)));
-  root.append(el('div', { class: 'tip-rows', style: { gridTemplateRows: `repeat(${Math.ceil(rows.length / columns)}, auto)` } },
-    rows.map((r) => el('div', { class: 'tip-row' },
-      r.color ? el('span', { class: 'tip-key', style: { background: r.color } }) : null,
-      el('span', { class: 'tip-value', text: r.value }),
-      el('span', { class: 'tip-name', text: r.name })))));
+export function tooltipNode(title, rows, total, maxColumns = 1, detail = null) {
+  const root = el('div', { class: 'tip' }, el('div', { class: 'tip-title', text: title }), tipRows(rows, maxColumns));
   if (total) {
     root.append(el('div', { class: 'tip-row tip-total' },
       el('span', { class: 'tip-value', text: total.value }), el('span', { class: 'tip-name', text: total.name })));
   }
+  if (detail && detail.rows.length > 0) {
+    root.append(el('div', { class: 'tip-detail' }, el('div', { class: 'tip-title', text: detail.title }),
+      tipRows(detail.rows, detail.maxColumns)));
+  }
   return root;
+}
+
+// 提示框里的几行：先从上到下、再从左到右排，一列最多 TIP_ROWS_PER_COLUMN 行。
+function tipRows(rows, maxColumns) {
+  const columns = Math.max(1, Math.min(maxColumns, Math.ceil(rows.length / TIP_ROWS_PER_COLUMN)));
+  return el('div', { class: 'tip-rows', style: { gridTemplateRows: `repeat(${Math.ceil(rows.length / columns)}, auto)` } },
+    rows.map((r) => el('div', { class: 'tip-row' },
+      r.color ? el('span', { class: 'tip-key', style: { background: r.color } }) : null,
+      el('span', { class: 'tip-value', text: r.value }),
+      el('span', { class: 'tip-name', text: r.name }))));
 }
 
 /**
