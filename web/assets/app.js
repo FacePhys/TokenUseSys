@@ -276,13 +276,21 @@ export function rangePicker({ today, dataSince, range, onChange }) {
   return root;
 }
 
-/** 分段切换按钮。options: [{key, label, disabled?, title?}]。 */
+/**
+ * 分段切换按钮。options: [{key, label, disabled?, title?}]。当前选中项由按钮组自己记着，
+ * 调用方切换后可以不重建它（比如「图 / 表」只换显示）。
+ */
 export function segmented(options, value, onChange, label) {
   const root = el('span', { class: 'segmented', role: 'group', 'aria-label': label || '' });
-  for (const o of options) {
-    root.append(el('button', { type: 'button', 'aria-pressed': String(o.key === value), disabled: !!o.disabled,
-      title: o.title, onclick: () => o.key !== value && onChange(o.key) }, o.label));
-  }
+  let current = value;
+  const buttons = options.map((o) => el('button', { type: 'button', 'aria-pressed': String(o.key === value),
+    disabled: !!o.disabled, title: o.title, onclick: () => {
+      if (o.key === current) return;
+      current = o.key;
+      buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(options[i].key === current)));
+      onChange(o.key);
+    } }, o.label));
+  root.append(...buttons);
   if (!label) return root;
   return el('span', {}, el('span', { class: 'segmented-label', text: label }), root);
 }
@@ -451,10 +459,17 @@ export function tooltipNode(title, rows, total) {
   return root;
 }
 
-/** 创建图表并跟随容器大小变化。 */
+/**
+ * 创建图表并跟随容器大小变化。容器被隐藏（切到表格）时是 0×0，不跟着缩：画面留着，切回来不用重画；
+ * 隐藏期间更新数据也照常画在原来的尺寸上。尺寸没变时也不重画。
+ */
 export function mountChart(node) {
   const chart = window.echarts.init(node, null, { renderer: 'canvas' });
-  new ResizeObserver(() => chart.resize()).observe(node);
+  new ResizeObserver(() => {
+    const w = node.clientWidth;
+    const h = node.clientHeight;
+    if (w && h && (w !== chart.getWidth() || h !== chart.getHeight())) chart.resize();
+  }).observe(node);
   return chart;
 }
 

@@ -245,12 +245,10 @@ function renderBar(pal, plan, colorOf) {
   renderBarView();
 }
 
+// 图 / 表切换只换显示：表格在 renderBar 里已经建好，图表隐藏时也不缩（见 mountChart），切回来不用重画。
 function renderBarView() {
   $('bar-chart').hidden = state.view !== 'chart';
   $('bar-table').hidden = state.view !== 'table';
-  if (state.view === 'chart') barChart.resize();
-  $('bar-view').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(
-    (b.textContent === '图') === (state.view === 'chart'))));
 }
 
 // 表格视图：行是日期，列是图里的各序列，最后一行 / 一列是合计。

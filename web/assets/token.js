@@ -188,7 +188,7 @@ function renderTrend(pal, color) {
     }),
     segmented([{ key: 'chart', label: '图' }, { key: 'table', label: '表' }], state.view, (v) => {
       state.view = v;
-      renderTrend(pal, color);
+      renderTrendView();
     }),
   );
 
@@ -222,9 +222,7 @@ function renderTrend(pal, color) {
     }],
   }, true);
 
-  $('trend-chart').hidden = state.view !== 'chart';
-  $('trend-table').hidden = state.view !== 'table';
-  if (state.view === 'chart') trendChart.resize();
+  renderTrendView();
   const sum = (k) => (line ? line[k].reduce((a, b) => a + b, 0) : 0);
   $('trend-table').replaceChildren(table({
     columns: [
@@ -239,6 +237,12 @@ function renderTrend(pal, color) {
     footer: ['合计', money(sum('amount'), cur), int(sum('requests')), compact(sum('prompt_tokens')),
       compact(sum('completion_tokens')), compact(sum('cache_read_tokens'))],
   }));
+}
+
+// 图 / 表切换只换显示：图表和表格在 renderTrend 里都已画好，图表隐藏时也不缩（见 mountChart），切回来不用重画。
+function renderTrendView() {
+  $('trend-chart').hidden = state.view !== 'chart';
+  $('trend-table').hidden = state.view !== 'table';
 }
 
 function renderModels(pal, mplan, modelColor) {
