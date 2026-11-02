@@ -105,3 +105,35 @@ func TestAlertTest(t *testing.T) {
 	require.Contains(t, stdout, "已发送")
 	require.Contains(t, got, "【RelayUsage】测试消息")
 }
+
+func TestReportPrintsAndSends(t *testing.T) {
+	dir := t.TempDir()
+	var got string
+	robot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+	}))
+	defer robot.Close()
+	storage := "storage:\n  sqlite_path: " + filepath.Join(dir, "usage.db") + "\n  backup_dir: " + filepath.Join(dir, "backups") + "\n"
+
+	path := writeConfig(t, storage)
+	stdout, _, err := run(t, "", "-config", path, "report", "-day", "2026-10-26")
+	require.NoError(t, err)
+	require.Contains(t, stdout, "用量日报（2026-10-26 周一）")
+	require.Contains(t, stdout, "当天没有用量。")
+	_, _, err = run(t, "", "-config", path, "report", "-send")
+	require.ErrorContains(t, err, "alert.webhook 没有配置")
+	_, _, err = run(t, "", "-config", path, "report", "-day", "昨天")
+	require.ErrorContains(t, err, "-day 格式")
+	stdout, _, err = run(t, "", "-config", path, "report")
+	require.NoError(t, err, "不带 -day 时是昨天")
+	require.Contains(t, stdout, "用量日报（")
+	require.Empty(t, got, "不带 -send 时不发")
+
+	path = writeConfig(t, storage+"alert:\n  webhook: "+robot.URL+"/robot/send?access_token=x\n")
+	_, stderr, err := run(t, "", "-config", path, "report", "-day", "2026-10-26", "-send")
+	require.NoError(t, err)
+	require.Contains(t, stderr, "已发送")
+	require.Contains(t, got, "【RelayUsage】用量日报（2026-10-26 周一）")
+}

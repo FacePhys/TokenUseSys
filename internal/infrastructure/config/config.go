@@ -73,11 +73,13 @@ type AuthConfig struct {
 	SessionTTL        time.Duration `yaml:"session_ttl"`
 }
 
-// AlertConfig 是群机器人通知（开发文档 §4.7）：同步失败、账户余额不足。webhook 为空时不发。
+// AlertConfig 是群机器人通知（开发文档 §4.7）：同步失败、账户余额不足、每日用量。webhook 为空时不发。
 type AlertConfig struct {
 	Webhook string `yaml:"webhook"`
 	// BalanceBelow：账户余额（按上游显示币种，4router 是人民币）低于它时提醒；0 表示不提醒。
 	BalanceBelow float64 `yaml:"balance_below"`
+	// DailyReportAt 是每天推送昨日用量的时刻（HH:MM，server.timezone）；留空表示不推送。
+	DailyReportAt string `yaml:"daily_report_at"`
 }
 
 type LogConfig struct {
@@ -211,6 +213,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Alert.BalanceBelow > 0 && c.Alert.Webhook == "" {
 		add("alert.balance_below 要配合 alert.webhook 使用，否则提醒发不出去")
+	}
+	if at := c.Alert.DailyReportAt; at != "" {
+		if _, err := time.Parse("15:04", at); err != nil {
+			add("alert.daily_report_at 必须是 HH:MM 格式")
+		}
+		if c.Alert.Webhook == "" {
+			add("alert.daily_report_at 要配合 alert.webhook 使用，否则日报发不出去")
+		}
 	}
 
 	l := c.Log

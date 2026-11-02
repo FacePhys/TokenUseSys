@@ -77,3 +77,22 @@ func (s *Syncer) backup(ctx context.Context, now time.Time) error {
 	s.log.Info("备份完成", "path", path)
 	return nil
 }
+
+// sendDailyReport 把昨天的用量发到群机器人（§4.7）。昨天的日志还没同步完（回填中、同步落后）时稍后再试，
+// 不发不完整的数字；发送失败也稍后重试。当天发成功后记在 kv 里，重启不会重发。
+func (s *Syncer) sendDailyReport(ctx context.Context, now time.Time) error {
+	today := usage.DayStart(now, s.cfg.Location)
+	if s.Backfilling() || s.cursor < today.Unix() {
+		return errNotYet
+	}
+	day := today.AddDate(0, 0, -1)
+	text, err := s.report(ctx, day)
+	if err != nil {
+		return err
+	}
+	if err := s.alert.Send(ctx, text); err != nil {
+		return err
+	}
+	s.log.Info("已发送用量日报", "day", day.Format(usage.DayLayout))
+	return nil
+}

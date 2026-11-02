@@ -3,6 +3,8 @@
 package usage
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -111,6 +113,52 @@ func (c Currency) Amount(quota int64) float64 {
 	default:
 		return float64(quota)
 	}
+}
+
+// Format 按显示币种格式化金额，带千分位：¥1,234.56；不足 0.01 时保留 4 位，小额不会显示成 ¥0.00。
+// TOKENS 或参数无效时是 quota 原值，没有符号和小数。
+func (c Currency) Format(v float64) string {
+	var symbol string
+	switch c.DisplayType {
+	case "CNY":
+		symbol = "¥"
+	case "USD":
+		symbol = "$"
+	default:
+		return groupDigits(strconv.FormatFloat(v, 'f', 0, 64))
+	}
+	digits := 2
+	if v != 0 && math.Abs(v) < 0.01 {
+		digits = 4
+	}
+	sign := ""
+	if v < 0 {
+		sign = "-"
+	}
+	return sign + symbol + groupDigits(strconv.FormatFloat(math.Abs(v), 'f', digits, 64))
+}
+
+// FormatInt 给整数加千分位：1,234,567。
+func FormatInt(n int64) string { return groupDigits(strconv.FormatInt(n, 10)) }
+
+func groupDigits(s string) string {
+	sign, rest := "", s
+	if strings.HasPrefix(s, "-") {
+		sign, rest = "-", s[1:]
+	}
+	whole, frac, hasFrac := strings.Cut(rest, ".")
+	var b strings.Builder
+	b.WriteString(sign)
+	for i, d := range whole {
+		if i > 0 && (len(whole)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(d)
+	}
+	if hasFrac {
+		b.WriteString("." + frac)
+	}
+	return b.String()
 }
 
 // Totals 是一组用量的合计。

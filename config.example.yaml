@@ -32,8 +32,9 @@ auth:
   session_ttl: 12h
 
 alert:
-  webhook: ""                 # 可选：群机器人地址（飞书 / 钉钉 / 企业微信；安全设置用关键词 RelayUsage），同步失败、余额不足时通知
+  webhook: ""                 # 可选：群机器人地址（飞书 / 钉钉 / 企业微信；安全设置用关键词 RelayUsage），同步失败、余额不足、每日用量都发到这里
   balance_below: 0            # 账户余额低于它（4router 是人民币）时提醒，每 6 小时提醒一次，充值后发恢复通知；0 表示不提醒
+  daily_report_at: ""         # 每天推送昨日用量的时刻，例如 "10:00"（server.timezone，建议晚于 sync.reconcile_at）；留空表示不推送
 
 log:
   level: info                 # debug、info、warn、error

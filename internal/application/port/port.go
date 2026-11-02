@@ -29,6 +29,7 @@ const (
 	KeyReconcileDay = "reconcile_last_day"
 	KeyPurgeDay     = "purge_last_day"
 	KeyBackupDay    = "backup_last_day"
+	KeyReportDay    = "report_last_day"
 )
 
 // 同步任务名，也是 kv 里执行状态的键名后缀（KeyTaskPrefix + 名字）。
@@ -39,6 +40,7 @@ const (
 	TaskPurge     = "purge"
 	TaskBackup    = "backup"
 	TaskReconcile = "reconcile"
+	TaskReport    = "report"
 )
 
 // TaskState 是一个任务的执行状态（JSON 存在 kv 里），页面状态条和 /healthz 读它。
@@ -58,9 +60,12 @@ type Alert struct {
 	Resolved bool
 }
 
-// Alerter 发送告警。失败只记日志，不影响同步。
+// Alerter 发送群机器人消息。
 type Alerter interface {
+	// Notify 发告警，按 Alert 的规则去重。失败只记日志，不影响同步。
 	Notify(ctx context.Context, a Alert)
+	// Send 直接发一条消息，不去重，失败时返回错误，由调用方决定是否重试（每日用量推送用它）。
+	Send(ctx context.Context, text string) error
 }
 
 // ErrUpstreamAuth 表示上游鉴权失败（access token 失效或用户 ID 不对）。同步器收到后暂停 30 分钟（§4.7）。

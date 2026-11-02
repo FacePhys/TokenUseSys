@@ -27,6 +27,7 @@ var taskLabels = []struct{ name, label string }{
 	{port.TaskReconcile, "对账"},
 	{port.TaskPurge, "清理"},
 	{port.TaskBackup, "备份"},
+	{port.TaskReport, "用量日报"},
 }
 
 // SyncStatus 是同步状态，总览的状态条和 /healthz 共用。

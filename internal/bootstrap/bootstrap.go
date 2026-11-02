@@ -1,10 +1,11 @@
-// Package bootstrap 按配置组装上游客户端、本地存储和同步器，供 server 和 relayctl 共用。
+// Package bootstrap 按配置组装上游客户端、告警和同步器，供 server 和 relayctl 共用。
 package bootstrap
 
 import (
 	"log/slog"
 	"time"
 
+	"github.com/FacePhys/TokenUseSys/internal/application/dashboard"
 	"github.com/FacePhys/TokenUseSys/internal/application/port"
 	"github.com/FacePhys/TokenUseSys/internal/application/syncer"
 	"github.com/FacePhys/TokenUseSys/internal/infrastructure/alert"
@@ -34,16 +35,29 @@ func NewAlerter(cfg *config.Config, log *slog.Logger) (port.Alerter, error) {
 	return alert.NewWebhook(cfg.Alert.Webhook, log)
 }
 
+// SyncOptions 是服务进程的同步器选项：告警，以及配了 alert.daily_report_at 时的每日用量推送（§4.7）。
+func SyncOptions(cfg *config.Config, alerter port.Alerter, dash *dashboard.Service) []syncer.Option {
+	opts := []syncer.Option{syncer.WithAlerter(alerter)}
+	if at := cfg.Alert.DailyReportAt; at != "" {
+		opts = append(opts, syncer.WithDailyReport(clockOffset(at), dash.DailyReport))
+	}
+	return opts
+}
+
+// clockOffset 把 HH:MM 换成当地 0 点之后多久；格式已在加载配置时校验过。
+func clockOffset(hhmm string) time.Duration {
+	at, _ := time.Parse("15:04", hhmm)
+	return time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute
+}
+
 // SyncerConfig 把配置转换成同步器参数。
 func SyncerConfig(cfg *config.Config) syncer.Config {
-	// reconcile_at 已在加载配置时校验过格式。
-	at, _ := time.Parse("15:04", cfg.Sync.ReconcileAt)
 	return syncer.Config{
 		LogInterval:           cfg.Sync.LogInterval,
 		SnapshotInterval:      cfg.Sync.SnapshotInterval,
 		Lag:                   cfg.Sync.Lag,
 		BackfillDays:          cfg.Sync.BackfillDays,
-		ReconcileAt:           time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute,
+		ReconcileAt:           clockOffset(cfg.Sync.ReconcileAt),
 		LogRetentionDays:      cfg.Storage.LogRetentionDays,
 		SnapshotRetentionDays: cfg.Storage.SnapshotRetentionDays,
 		BackupDir:             cfg.Storage.BackupDir,

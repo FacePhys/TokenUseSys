@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -403,4 +404,108 @@ func TestHealthAndSyncErrors(t *testing.T) {
 	require.True(t, sum.Sync.Backfilling)
 	require.True(t, sum.Sync.Healthy)
 	require.InDelta(t, 24.0/60.0, sum.Sync.BackfillProgress, 0.001)
+}
+
+func TestDailyReport(t *testing.T) {
+	f := newFixture(t)
+	f.seed()
+	ctx := context.Background()
+	f.kv(port.KeyAccount, usage.Account{Quota: 1_234_567_890})
+
+	text, err := f.svc.DailyReport(ctx, time.Date(2026, 10, 26, 0, 0, 0, 0, cst))
+	require.NoError(t, err)
+	require.Equal(t, `用量日报（2026-10-26 周一）
+总消费 ¥1.30，较前一天 -48.0%
+请求 3 次，Token 36（输入 30，输出 6）
+
+按令牌：
+prod  ¥1.00（76.9%），1 次
+old  ¥0.20（15.4%），1 次
+未归属  ¥0.10（7.7%），1 次
+
+按模型：
+m1  ¥1.20（92.3%）
+m3  ¥0.10（7.7%）
+
+账户余额 ¥2,469.14`, text, "没用量的令牌不列，已删除和未归属的照常列")
+
+	// 数字和看板上选这一天时一致。
+	list, err := f.svc.Tokens(ctx, f.rng("2026-10-26", "2026-10-26"))
+	require.NoError(t, err)
+	require.InDelta(t, 1.30, list.Total.Amount, 1e-9)
+
+	text, err = f.svc.DailyReport(ctx, time.Date(2026, 10, 25, 23, 0, 0, 0, cst))
+	require.NoError(t, err)
+	require.Contains(t, text, "用量日报（2026-10-25 周日）\n总消费 ¥2.50\n", "前一天没有数据时不比较；当天任意时刻都算这一天")
+
+	text, err = f.svc.DailyReport(ctx, time.Date(2026, 10, 20, 0, 0, 0, 0, cst))
+	require.NoError(t, err)
+	require.Equal(t, "用量日报（2026-10-20 周二）\n当天没有用量。\n\n账户余额 ¥2,469.14", text)
+}
+
+func TestDailyReportReconcileWarning(t *testing.T) {
+	f := newFixture(t)
+	f.seed()
+	ctx := context.Background()
+	day := time.Date(2026, 10, 26, 0, 0, 0, 0, cst)
+	snap := int64(1_500_000)
+	require.NoError(t, f.db.SaveReconcile(ctx, usage.ReconcileReport{Day: "2026-10-26", UpstreamQuota: 700_000, LocalQuota: 650_000, SnapshotQuota: &snap}))
+	text, err := f.svc.DailyReport(ctx, day)
+	require.NoError(t, err)
+	require.Contains(t, text, "注意：当天对账有差异（上游 ¥1.40，本地 ¥1.30，令牌快照 ¥3.00），以上数字可能不准。")
+
+	// 对账一致时不提示；别的日期的对账结果不影响这一天。
+	require.NoError(t, f.db.SaveReconcile(ctx, usage.ReconcileReport{Day: "2026-10-26", UpstreamQuota: 650_000, LocalQuota: 650_000}))
+	text, err = f.svc.DailyReport(ctx, day)
+	require.NoError(t, err)
+	require.NotContains(t, text, "注意")
+	require.NoError(t, f.db.SaveReconcile(ctx, usage.ReconcileReport{Day: "2026-10-27", UpstreamQuota: 1, LocalQuota: 2}))
+	text, err = f.svc.DailyReport(ctx, day)
+	require.NoError(t, err)
+	require.NotContains(t, text, "注意")
+}
+
+func TestDailyReportMergesTailAndStaysShort(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	slot := now.Add(-time.Hour)
+	day := time.Date(2026, 10, 26, 0, 0, 0, 0, cst)
+	var tokens []usage.Token
+	var entries []usage.LogEntry
+	for i := range int64(12) {
+		id := i + 1
+		tokens = append(tokens, usage.Token{ID: id, Name: fmt.Sprintf("名字特别特别特别特别特别特别特别特别特别特别特别长的令牌-%02d", id), Status: 1})
+		// 金额从高到低：令牌 1 最多。模型 7 个。
+		entries = append(entries, usage.LogEntry{CreatedAt: day.Unix() + 60*id, TokenID: id, TokenName: "x",
+			ModelName: fmt.Sprintf("名字特别特别特别特别特别特别特别特别特别特别特别长的模型-%02d", id%7), Quota: (20 - id) * 50_000_000_000,
+			PromptTokens: 123_456_789, CompletionTokens: 12_345_678})
+	}
+	require.NoError(t, f.db.SyncTokens(ctx, tokens, true, slot, slot))
+	require.NoError(t, f.db.ReplaceWindow(ctx, day.Unix(), day.Unix()+86400, entries, nil))
+	f.kv(port.KeyCurrency, usage.Currency{QuotaPerUnit: 500000, DisplayType: "CNY", ExchangeRate: 1})
+
+	text, err := f.svc.DailyReport(ctx, day)
+	require.NoError(t, err)
+	require.Contains(t, text, "其他 4 个  ¥", "前 8 个令牌以外合并")
+	require.Contains(t, text, "其他 2 个  ¥", "前 5 个模型以外合并")
+	require.Contains(t, text, "…")
+	require.Contains(t, text, "Token 16.3亿（输入 14.8亿，输出 1.48亿）")
+	require.LessOrEqual(t, len(text)+len("【RelayUsage】"), 2048, "企业微信的文本消息上限是 2048 字节")
+	require.True(t, utf8.ValidString(text), "截断时不切断字符")
+}
+
+func TestCompactCount(t *testing.T) {
+	for want, n := range map[string]int64{"9,999": 9999, "1万": 10000, "1.23万": 12345, "12.3万": 123456, "123万": 1234567, "1亿": 100000000, "1.23亿": 123456789} {
+		require.Equal(t, want, compactCount(n))
+	}
+}
+
+func TestReportFailureShownInStatus(t *testing.T) {
+	f := newFixture(t)
+	f.seed()
+	f.kv(port.KeyTaskPrefix+port.TaskReport, port.TaskState{LastError: "机器人返回 HTTP 502", LastErrorAt: 200})
+	h, err := f.svc.Health(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "用量日报失败：机器人返回 HTTP 502", h.Error)
+	require.True(t, h.OK, "发不出日报不影响同步健康")
 }

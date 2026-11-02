@@ -40,9 +40,22 @@ type fakeUpstream struct {
 }
 
 // fakeAlerter 记下所有告警（去重是 alert 包的事，这里原样记录）。
-type fakeAlerter struct{ alerts []port.Alert }
+type fakeAlerter struct {
+	alerts []port.Alert
+	// sent 是 Send 发出的消息；sendErr 非空时 Send 失败。
+	sent    []string
+	sendErr error
+}
 
 func (f *fakeAlerter) Notify(_ context.Context, a port.Alert) { f.alerts = append(f.alerts, a) }
+
+func (f *fakeAlerter) Send(_ context.Context, text string) error {
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.sent = append(f.sent, text)
+	return nil
+}
 
 // raised 返回发出的告警（不含恢复通知）的 key。
 func (f *fakeAlerter) raised() []string {
@@ -545,4 +558,128 @@ func TestNoBalanceAlertWithoutThreshold(t *testing.T) {
 	h := newHarness(t, now, &fakeUpstream{quota: &quota}, WithAlerter(alerts))
 	h.catchUp()
 	require.Empty(t, alerts.raised(), "没配 balance_below 时不提醒")
+}
+
+func dayReport(_ context.Context, day time.Time) (string, error) {
+	return "日报 " + day.Format(usage.DayLayout), nil
+}
+
+func TestDailyReportSentOncePerDay(t *testing.T) {
+	now := time.Date(2026, 10, 27, 9, 59, 0, 0, cst)
+	up := &fakeUpstream{}
+	alerts := &fakeAlerter{}
+	h := newHarness(t, now, up, WithAlerter(alerts), WithDailyReport(10*time.Hour, dayReport))
+	h.catchUp()
+	require.Empty(t, alerts.sent, "没到 10 点")
+
+	h.now = time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	require.LessOrEqual(t, h.s.Step(context.Background()), 5*time.Minute)
+	require.Equal(t, []string{"日报 2026-10-26"}, alerts.sent, "到点推送昨天")
+	require.Equal(t, "2026-10-27", kv(t, h.db, port.KeyReportDay))
+
+	h.now = time.Date(2026, 10, 27, 15, 0, 0, 0, cst)
+	h.catchUp()
+	require.Len(t, alerts.sent, 1, "当天不重复发")
+
+	// 重启后不重发。
+	restarted := New(up, h.db, h.s.cfg, h.s.log, WithClock(func() time.Time { return h.now }), WithAlerter(alerts),
+		WithDailyReport(10*time.Hour, dayReport))
+	require.NoError(t, restarted.Init(context.Background()))
+	restarted.Step(context.Background())
+	require.Len(t, alerts.sent, 1, "kv 里记了今天已发")
+
+	h.now = time.Date(2026, 10, 28, 10, 0, 0, 0, cst)
+	h.catchUp()
+	require.Equal(t, []string{"日报 2026-10-26", "日报 2026-10-27"}, alerts.sent, "第二天接着发")
+}
+
+func TestDailyReportSentLateAfterDowntime(t *testing.T) {
+	now := time.Date(2026, 10, 27, 15, 0, 0, 0, cst) // 10 点时服务没在跑
+	alerts := &fakeAlerter{}
+	h := newHarness(t, now, &fakeUpstream{}, WithAlerter(alerts), WithDailyReport(10*time.Hour, dayReport))
+	h.catchUp()
+	h.now = now.Add(dailyRetry)
+	h.s.Step(context.Background())
+	require.Equal(t, []string{"日报 2026-10-26"}, alerts.sent, "错过时间点就补发")
+}
+
+func TestDailyReportRetriesOnSendFailure(t *testing.T) {
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	alerts := &fakeAlerter{sendErr: errors.New("机器人返回 HTTP 502")}
+	h := newHarness(t, now, &fakeUpstream{}, WithAlerter(alerts), WithDailyReport(10*time.Hour, dayReport))
+	h.catchUp()
+	h.now = now.Add(dailyRetry)
+	h.s.Step(context.Background())
+	require.Empty(t, kv(t, h.db, port.KeyReportDay), "没发成功，不记今天已发")
+	require.Contains(t, kv(t, h.db, port.KeyTaskPrefix+port.TaskReport), "机器人返回 HTTP 502", "错误显示在页面状态条")
+
+	alerts.sendErr = nil
+	h.now = h.now.Add(5 * time.Minute)
+	h.s.Step(context.Background())
+	require.Empty(t, alerts.sent, "10 分钟后才重试")
+	h.now = h.now.Add(5 * time.Minute)
+	h.s.Step(context.Background())
+	require.Len(t, alerts.sent, 1)
+	require.Equal(t, "2026-10-27", kv(t, h.db, port.KeyReportDay))
+	var st port.TaskState
+	require.NoError(t, json.Unmarshal([]byte(kv(t, h.db, port.KeyTaskPrefix+port.TaskReport)), &st))
+	require.Empty(t, st.LastError, "发成功后错误清空")
+}
+
+func TestDailyReportBuildFailureRetries(t *testing.T) {
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	alerts := &fakeAlerter{}
+	fail := true
+	build := func(ctx context.Context, day time.Time) (string, error) {
+		if fail {
+			return "", errors.New("查询失败")
+		}
+		return dayReport(ctx, day)
+	}
+	h := newHarness(t, now, &fakeUpstream{}, WithAlerter(alerts), WithDailyReport(10*time.Hour, build))
+	h.catchUp()
+	h.now = now.Add(dailyRetry)
+	h.s.Step(context.Background())
+	require.Empty(t, alerts.sent)
+	fail = false
+	h.now = h.now.Add(dailyRetry)
+	h.s.Step(context.Background())
+	require.Len(t, alerts.sent, 1)
+}
+
+func TestDailyReportWaitsForYesterdayData(t *testing.T) {
+	// 回填中不发。
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	alerts := &fakeAlerter{}
+	h := newHarness(t, now, &fakeUpstream{}, WithAlerter(alerts), WithDailyReport(10*time.Hour, dayReport))
+	h.s.Step(context.Background())
+	require.True(t, h.s.Backfilling())
+	require.Empty(t, alerts.sent)
+	require.Empty(t, kv(t, h.db, port.KeyTaskPrefix+port.TaskReport), "等待不算失败")
+
+	// 同步卡在昨天：不发不完整的数字，追上后再发。
+	start := time.Date(2026, 10, 26, 23, 50, 0, 0, cst)
+	up := &fakeUpstream{}
+	alerts = &fakeAlerter{}
+	h = newHarness(t, start, up, WithAlerter(alerts), WithDailyReport(10*time.Hour, dayReport))
+	h.catchUp()
+	up.failLogs = true
+	h.now = now
+	h.s.Step(context.Background())
+	require.Empty(t, alerts.sent, "游标还没过今天 0 点")
+
+	up.failLogs = false
+	h.now = now.Add(dailyRetry)
+	h.catchUp()
+	h.now = h.now.Add(dailyRetry)
+	h.s.Step(context.Background())
+	require.Equal(t, []string{"日报 2026-10-26"}, alerts.sent)
+}
+
+func TestNoDailyReportByDefault(t *testing.T) {
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	alerts := &fakeAlerter{}
+	h := newHarness(t, now, &fakeUpstream{}, WithAlerter(alerts))
+	h.catchUp()
+	require.Empty(t, alerts.sent)
 }

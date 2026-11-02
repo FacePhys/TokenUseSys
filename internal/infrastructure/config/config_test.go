@@ -35,6 +35,8 @@ func TestInvalidValuesRejected(t *testing.T) {
 		"日志级别错误":   "log:\n  level: verbose\n",
 		"余额提醒线为负":  "alert:\n  webhook: https://open.feishu.cn/x\n  balance_below: -1\n",
 		"余额提醒没有地址": "alert:\n  balance_below: 50\n",
+		"日报时间格式错误": "alert:\n  webhook: https://open.feishu.cn/x\n  daily_report_at: \"25:00\"\n",
+		"日报没有地址":   "alert:\n  daily_report_at: \"10:00\"\n",
 	}
 	for name, yml := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -74,4 +76,12 @@ func TestBalanceBelow(t *testing.T) {
 	cfg, err := Parse([]byte("alert:\n  webhook: https://open.feishu.cn/open-apis/bot/v2/hook/x\n  balance_below: 50\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 50.0, cfg.Alert.BalanceBelow, 1e-9)
+}
+
+func TestDailyReportAt(t *testing.T) {
+	for _, value := range []string{`"10:00"`, `10:00`} {
+		cfg, err := Parse([]byte("alert:\n  webhook: https://open.feishu.cn/x\n  daily_report_at: " + value + "\n"))
+		require.NoError(t, err, value)
+		require.Equal(t, "10:00", cfg.Alert.DailyReportAt, "加不加引号都行")
+	}
 }

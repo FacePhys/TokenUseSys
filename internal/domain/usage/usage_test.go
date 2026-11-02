@@ -74,3 +74,23 @@ func TestDayStart(t *testing.T) {
 	require.Equal(t, time.Date(2026, 10, 27, 0, 0, 0, 0, loc), got)
 	require.Equal(t, int64(1792512000+6*86400), got.Unix())
 }
+
+func TestCurrencyFormat(t *testing.T) {
+	cny := Currency{QuotaPerUnit: 500000, DisplayType: "CNY", ExchangeRate: 1}
+	require.Equal(t, "¥0.00", cny.Format(0))
+	require.Equal(t, "¥20.00", cny.Format(20))
+	require.Equal(t, "¥1,234,567.89", cny.Format(1234567.891))
+	require.Equal(t, "¥0.0012", cny.Format(0.00123), "小额保留 4 位")
+	require.Equal(t, "-¥0.12", cny.Format(-0.12))
+	require.Equal(t, "$12.50", Currency{DisplayType: "USD"}.Format(12.5))
+	require.Equal(t, "1,000,000", Currency{DisplayType: "TOKENS"}.Format(1000000))
+	require.Equal(t, "42", Currency{}.Format(42), "还没取到换算参数时是原值")
+}
+
+func TestFormatInt(t *testing.T) {
+	require.Equal(t, "0", FormatInt(0))
+	require.Equal(t, "999", FormatInt(999))
+	require.Equal(t, "1,000", FormatInt(1000))
+	require.Equal(t, "1,234,567", FormatInt(1234567))
+	require.Equal(t, "-1,234", FormatInt(-1234))
+}

@@ -1,4 +1,4 @@
-// Package alert 把同步异常和余额不足发到群机器人（开发文档 §4.7）：飞书、钉钉、企业微信，按 webhook 的域名选消息格式。
+// Package alert 把同步异常、余额不足和每日用量发到群机器人（开发文档 §4.7）：飞书、钉钉、企业微信，按 webhook 的域名选消息格式。
 // 同一告警 6 小时内只发一次，情况变严重时立即发；恢复时补发一条。webhook 地址里有机器人的 token，日志里只记域名。
 package alert
 
@@ -31,6 +31,8 @@ const (
 type Noop struct{}
 
 func (Noop) Notify(context.Context, port.Alert) {}
+
+func (Noop) Send(context.Context, string) error { return nil }
 
 // format 是机器人的消息格式。
 type format int
@@ -111,7 +113,7 @@ func (w *Webhook) Notify(ctx context.Context, a port.Alert) {
 	w.log.InfoContext(ctx, "已发送告警", "host", w.host, "key", a.Key, "resolved", a.Resolved)
 }
 
-// Send 直接发一条消息，不去重；relayctl alert-test 用它检查配置。停机时也能发完（不跟随 ctx 取消）。
+// Send 直接发一条消息，不去重：每日用量推送和 relayctl alert-test 用它。停机时也能发完（不跟随 ctx 取消）。
 func (w *Webhook) Send(ctx context.Context, text string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendTimeout)
 	defer cancel()

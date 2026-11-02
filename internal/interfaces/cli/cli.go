@@ -1,4 +1,4 @@
-// Package cli 是 relayctl 命令行接口：上游自检、生成密码哈希、重拉某一天、立即备份、测试告警（开发文档 §10）。
+// Package cli 是 relayctl 命令行接口：上游自检、生成密码哈希、重拉某一天、立即备份、测试告警、用量日报（开发文档 §10）。
 package cli
 
 import (
@@ -20,6 +20,8 @@ const usageText = `用法: relayctl [-config config.yaml] <子命令> [参数]
                                默认不替换本地数据，-force 强制替换。可以和服务同时运行
   backup                       立即备份一次数据库到 storage.backup_dir
   alert-test                   往 alert.webhook 发一条测试消息（飞书 / 钉钉 / 企业微信机器人）
+  report [-day 2026-10-26] [-send]
+                               打印某一天的用量日报（默认昨天），带 -send 时同时发到 alert.webhook
 `
 
 // Run 解析全局参数并执行子命令。
@@ -48,6 +50,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return e.backup(ctx, rest)
 	case "alert-test":
 		return e.alertTest(ctx, rest)
+	case "report":
+		return e.report(ctx, rest)
 	default:
 		fs.Usage()
 		return fmt.Errorf("未知的子命令 %q", cmd)

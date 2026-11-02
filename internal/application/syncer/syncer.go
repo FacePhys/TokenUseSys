@@ -74,8 +74,11 @@ type Syncer struct {
 	cursor        int64
 	backfillUntil int64
 	// cur 是上游的换算参数，换算余额用；还没取到时 curOK 为 false，不检查余额。
-	cur         usage.Currency
-	curOK       bool
+	cur   usage.Currency
+	curOK bool
+	// report 为 nil 时不推送每日用量；reportAt 是当地 0 点之后多久。
+	report      ReportFunc
+	reportAt    time.Duration
 	pausedUntil time.Time
 	next        map[string]time.Time
 	states      map[string]port.TaskState
@@ -102,9 +105,19 @@ func WithMaxPages(n int) Option { return func(s *Syncer) { s.maxPages = n } }
 // WithAlerter 设置告警；不设置时不发。
 func WithAlerter(a port.Alerter) Option { return func(s *Syncer) { s.alert = a } }
 
+// ReportFunc 生成某一天的用量日报（纯文本）。
+type ReportFunc func(ctx context.Context, day time.Time) (string, error)
+
+// WithDailyReport 开启每日用量推送：每天 at（当地 0 点之后多久）把昨天的用量发到群机器人（§4.7）。
+func WithDailyReport(at time.Duration, build ReportFunc) Option {
+	return func(s *Syncer) { s.report, s.reportAt = build, at }
+}
+
 type noAlert struct{}
 
 func (noAlert) Notify(context.Context, port.Alert) {}
+
+func (noAlert) Send(context.Context, string) error { return nil }
 
 func New(up port.Upstream, store port.Store, cfg Config, log *slog.Logger, opts ...Option) *Syncer {
 	s := &Syncer{
@@ -123,6 +136,10 @@ func New(up port.Upstream, store port.Store, cfg Config, log *slog.Logger, opts 
 		{port.TaskBackup, false, s.dailyTask(port.KeyBackupDay, backupAt, s.backup)},
 		// 对账要重拉 24 个小时窗口，最慢，放在最后。
 		{port.TaskReconcile, true, s.dailyTask(port.KeyReconcileDay, s.cfg.ReconcileAt, s.reconcileYesterday)},
+	}
+	// 用量日报放在对账之后：两个任务同时到期时（比如服务停过一阵），先补上迟到的日志再发。
+	if s.report != nil {
+		s.tasks = append(s.tasks, task{port.TaskReport, false, s.dailyTask(port.KeyReportDay, s.reportAt, s.sendDailyReport)})
 	}
 	return s
 }
@@ -189,7 +206,7 @@ func (s *Syncer) Init(ctx context.Context) error {
 			}
 		}
 	}
-	for _, key := range []string{port.KeyReconcileDay, port.KeyPurgeDay, port.KeyBackupDay} {
+	for _, key := range []string{port.KeyReconcileDay, port.KeyPurgeDay, port.KeyBackupDay, port.KeyReportDay} {
 		v, _, err := s.store.GetKV(ctx, key)
 		if err != nil {
 			return err
@@ -395,18 +412,18 @@ func (s *Syncer) checkBalance(ctx context.Context, acc usage.Account) {
 	balance := s.cur.Amount(acc.Quota)
 	if balance >= limit {
 		s.alert.Notify(ctx, port.Alert{Key: alertBalance, Resolved: true,
-			Text: fmt.Sprintf("账户余额已回到 %s（提醒线 %s）。", s.money(balance), s.money(limit))})
+			Text: fmt.Sprintf("账户余额已回到 %s（提醒线 %s）。", s.cur.Format(balance), s.cur.Format(limit))})
 		return
 	}
 	var text string
 	level := balanceLow
 	if balance <= 0 {
 		level = balanceEmpty
-		text = fmt.Sprintf("账户余额已用完（%s），调用会失败，请尽快在 4router 充值。", s.money(balance))
+		text = fmt.Sprintf("账户余额已用完（%s），调用会失败，请尽快在 4router 充值。", s.cur.Format(balance))
 	} else {
-		text = fmt.Sprintf("账户余额 %s，低于提醒线 %s。", s.money(balance), s.money(limit))
+		text = fmt.Sprintf("账户余额 %s，低于提醒线 %s。", s.cur.Format(balance), s.cur.Format(limit))
 		if days, daily, ok := s.dailySpend(ctx); ok && daily > 0 {
-			text += fmt.Sprintf("近 %s日均消费 %s，按这个速度大约还能用 %.1f 天。", days, s.money(daily), balance/daily)
+			text += fmt.Sprintf("近 %s日均消费 %s，按这个速度大约还能用 %.1f 天。", days, s.cur.Format(daily), balance/daily)
 		}
 		text += "请及时在 4router 充值。"
 	}
@@ -438,15 +455,4 @@ func (s *Syncer) dailySpend(ctx context.Context) (label string, daily float64, o
 		label = fmt.Sprintf("%.1f 天", span)
 	}
 	return label, s.cur.Amount(quota) / span, true
-}
-
-// money 按上游的显示币种格式化金额。
-func (s *Syncer) money(v float64) string {
-	switch s.cur.DisplayType {
-	case "CNY":
-		return fmt.Sprintf("¥%.2f", v)
-	case "USD":
-		return fmt.Sprintf("$%.2f", v)
-	}
-	return fmt.Sprintf("%.0f", v)
 }

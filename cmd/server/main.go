@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/FacePhys/TokenUseSys/internal/application/dashboard"
-	"github.com/FacePhys/TokenUseSys/internal/application/syncer"
 	"github.com/FacePhys/TokenUseSys/internal/bootstrap"
 	"github.com/FacePhys/TokenUseSys/internal/infrastructure/config"
 	"github.com/FacePhys/TokenUseSys/internal/infrastructure/logging"
@@ -63,10 +62,11 @@ func run(configPath string) error {
 	}
 	defer store.Close()
 
+	dash := dashboard.New(store.Dashboard(), cfg.Location(), cfg.TZOffset(), nil)
 	gin.SetMode(gin.ReleaseMode)
 	router, err := httpapi.NewRouter(httpapi.Options{
 		Log:       log,
-		Dashboard: dashboard.New(store.Dashboard(), cfg.Location(), cfg.TZOffset(), nil),
+		Dashboard: dash,
 		Auth: httpapi.AuthOptions{User: cfg.Auth.AdminUser, PasswordHash: cfg.Auth.AdminPasswordHash,
 			Secret: cfg.Auth.SessionSecret, TTL: cfg.Auth.SessionTTL},
 		Web: web.FS,
@@ -82,7 +82,7 @@ func run(configPath string) error {
 	}
 	syncDone := make(chan error, 1)
 	go func() {
-		s := bootstrap.NewSyncer(cfg, bootstrap.NewUpstream(cfg, log), store, log, syncer.WithAlerter(alerter))
+		s := bootstrap.NewSyncer(cfg, bootstrap.NewUpstream(cfg, log), store, log, bootstrap.SyncOptions(cfg, alerter, dash)...)
 		syncDone <- s.Run(ctx)
 	}()
 	serveErr := make(chan error, 1)

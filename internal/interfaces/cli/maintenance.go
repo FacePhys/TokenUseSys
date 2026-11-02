@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/FacePhys/TokenUseSys/internal/application/dashboard"
 	"github.com/FacePhys/TokenUseSys/internal/bootstrap"
 	"github.com/FacePhys/TokenUseSys/internal/domain/usage"
 	"github.com/FacePhys/TokenUseSys/internal/infrastructure/alert"
@@ -109,5 +110,51 @@ func (e *env) alertTest(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintln(e.stdout, "已发送，到群里看一下有没有收到")
+	return nil
+}
+
+// report 打印某一天的用量日报（默认昨天），带 -send 时同时发到 alert.webhook（§4.7）。数字来自本地库，不访问上游。
+func (e *env) report(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	fs.SetOutput(e.stderr)
+	dayFlag := fs.String("day", "", "日期，例如 2026-10-26；默认昨天")
+	send := fs.Bool("send", false, "同时发到 alert.webhook；不带时只打印")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(e.configPath)
+	if err != nil {
+		return err
+	}
+	if *send && cfg.Alert.Webhook == "" {
+		return errors.New("alert.webhook 没有配置")
+	}
+	day := time.Now().In(cfg.Location()).AddDate(0, 0, -1)
+	if *dayFlag != "" {
+		if day, err = time.ParseInLocation(usage.DayLayout, *dayFlag, cfg.Location()); err != nil {
+			return fmt.Errorf("-day 格式应为 2026-10-26：%w", err)
+		}
+	}
+	store, err := sqlite.Open(ctx, cfg.Storage.SQLitePath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	text, err := dashboard.New(store.Dashboard(), cfg.Location(), cfg.TZOffset(), nil).DailyReport(ctx, day)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(e.stdout, text)
+	if !*send {
+		return nil
+	}
+	w, err := alert.NewWebhook(cfg.Alert.Webhook, logging.New(cfg.Log, e.stderr))
+	if err != nil {
+		return err
+	}
+	if err := w.Send(ctx, text); err != nil {
+		return err
+	}
+	fmt.Fprintln(e.stderr, "已发送")
 	return nil
 }
