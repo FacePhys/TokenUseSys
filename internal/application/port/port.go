@@ -49,11 +49,12 @@ type TaskState struct {
 	LastErrorAt int64  `json:"last_error_at,omitempty"`
 }
 
-// Alert 是一条告警（§4.7）。Key 相同的告警 6 小时内只发一次；Resolved 为 true 是恢复通知，
-// 只在这个 Key 告过警、还没恢复时才发。
+// Alert 是一条告警（§4.7）。Key 相同的告警 6 小时内只发一次，但 Level 比上次发的高（情况变严重）时立即发；
+// Resolved 为 true 是恢复通知，只在这个 Key 告过警、还没恢复时才发。
 type Alert struct {
 	Key      string
 	Text     string
+	Level    int
 	Resolved bool
 }
 

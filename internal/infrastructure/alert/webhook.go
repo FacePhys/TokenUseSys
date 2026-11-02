@@ -1,5 +1,5 @@
-// Package alert 把同步异常发到群机器人（开发文档 §4.7）：飞书、钉钉、企业微信，按 webhook 的域名选消息格式。
-// 同一告警 6 小时内只发一次；恢复时补发一条。webhook 地址里有机器人的 token，日志里只记域名。
+// Package alert 把同步异常和余额不足发到群机器人（开发文档 §4.7）：飞书、钉钉、企业微信，按 webhook 的域名选消息格式。
+// 同一告警 6 小时内只发一次，情况变严重时立即发；恢复时补发一条。webhook 地址里有机器人的 token，日志里只记域名。
 package alert
 
 import (
@@ -63,6 +63,7 @@ type Webhook struct {
 
 	mu     sync.Mutex
 	sent   map[string]time.Time // 告警 key → 最后一次发送时间
+	level  map[string]int       // 告警 key → 最后一次发送时的严重程度
 	active map[string]bool      // 告警 key → 发过告警、还没恢复
 }
 
@@ -77,11 +78,11 @@ func NewWebhook(rawURL string, log *slog.Logger) (*Webhook, error) {
 		url: rawURL, host: u.Host, format: formatFor(u.Hostname()),
 		client: &http.Client{Timeout: sendTimeout},
 		log:    log, now: time.Now,
-		sent: map[string]time.Time{}, active: map[string]bool{},
+		sent: map[string]time.Time{}, level: map[string]int{}, active: map[string]bool{},
 	}, nil
 }
 
-// Notify 按去重规则发送：同一告警 6 小时内只发一次；恢复通知只在告过警之后发一次。
+// Notify 按去重规则发送：同一告警 6 小时内只发一次，严重程度升高时立即发；恢复通知只在告过警之后发一次。
 func (w *Webhook) Notify(ctx context.Context, a port.Alert) {
 	w.mu.Lock()
 	now := w.now()
@@ -92,12 +93,14 @@ func (w *Webhook) Notify(ctx context.Context, a port.Alert) {
 	case a.Resolved:
 		delete(w.active, a.Key)
 		delete(w.sent, a.Key)
+		delete(w.level, a.Key)
 	default:
-		if last, ok := w.sent[a.Key]; ok && now.Sub(last) < dedupeWindow {
+		if last, ok := w.sent[a.Key]; ok && now.Sub(last) < dedupeWindow && a.Level <= w.level[a.Key] {
 			w.mu.Unlock()
 			return
 		}
 		w.sent[a.Key] = now
+		w.level[a.Key] = a.Level
 		w.active[a.Key] = true
 	}
 	w.mu.Unlock()

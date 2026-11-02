@@ -73,9 +73,11 @@ type AuthConfig struct {
 	SessionTTL        time.Duration `yaml:"session_ttl"`
 }
 
-// AlertConfig 是同步失败时的通知（开发文档 §4.7），webhook 为空时不发。
+// AlertConfig 是群机器人通知（开发文档 §4.7）：同步失败、账户余额不足。webhook 为空时不发。
 type AlertConfig struct {
 	Webhook string `yaml:"webhook"`
+	// BalanceBelow：账户余额（按上游显示币种，4router 是人民币）低于它时提醒；0 表示不提醒。
+	BalanceBelow float64 `yaml:"balance_below"`
 }
 
 type LogConfig struct {
@@ -203,6 +205,12 @@ func (c *Config) Validate() error {
 		if parsed, err := url.Parse(w); err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
 			add("alert.webhook 必须是 http(s) 地址")
 		}
+	}
+	if c.Alert.BalanceBelow < 0 {
+		add("alert.balance_below 不能为负数")
+	}
+	if c.Alert.BalanceBelow > 0 && c.Alert.Webhook == "" {
+		add("alert.balance_below 要配合 alert.webhook 使用，否则提醒发不出去")
 	}
 
 	l := c.Log

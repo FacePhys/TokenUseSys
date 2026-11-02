@@ -49,5 +49,6 @@ func SyncerConfig(cfg *config.Config) syncer.Config {
 		BackupDir:             cfg.Storage.BackupDir,
 		BackupKeepDays:        cfg.Storage.BackupKeepDays,
 		Location:              cfg.Location(),
+		BalanceBelow:          cfg.Alert.BalanceBelow,
 	}
 }

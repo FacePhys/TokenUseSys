@@ -35,6 +35,8 @@ type fakeUpstream struct {
 	failTokenPage bool
 	failLogs      bool
 	calls         int
+	// quota 是账户余额（quota），为空时是 1000。
+	quota *int64
 }
 
 // fakeAlerter 记下所有告警（去重是 alert 包的事，这里原样记录）。
@@ -82,7 +84,11 @@ func (f *fakeUpstream) Currency(ctx context.Context) (usage.Currency, error) {
 func (f *fakeUpstream) Account(ctx context.Context) (usage.Account, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return usage.Account{Quota: 1000, UsedQuota: 10}, f.check(ctx)
+	quota := int64(1000)
+	if f.quota != nil {
+		quota = *f.quota
+	}
+	return usage.Account{Quota: quota, UsedQuota: 10}, f.check(ctx)
 }
 
 func (f *fakeUpstream) Tokens(ctx context.Context) ([]usage.Token, error) {
@@ -499,4 +505,44 @@ func TestLagAlerts(t *testing.T) {
 	h.now = now.Add(36 * time.Minute)
 	h.catchUp()
 	require.True(t, alerts.last(alertLag).Resolved)
+}
+
+func TestBalanceAlerts(t *testing.T) {
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	quota := int64(10_000_000) // ¥20（500000 quota = ¥1）
+	up := &fakeUpstream{quota: &quota}
+	up.add(spread(now.Add(-48*time.Hour), now, 10*time.Minute)...)
+	alerts := &fakeAlerter{}
+	h := newHarness(t, now, up, WithAlerter(alerts), func(s *Syncer) { s.cfg.BalanceBelow = 50 })
+	h.catchUp()
+	h.now = now.Add(5 * time.Minute)
+	h.s.Step(context.Background()) // 回填完成后的快照：消息里带日均消费
+	last := alerts.last(alertBalance)
+	require.False(t, last.Resolved)
+	require.Contains(t, last.Text, "账户余额 ¥20.00，低于提醒线 ¥50.00。")
+	require.Regexp(t, `近 [\d.]+ 天日均消费 ¥[\d.]+，按这个速度大约还能用 [\d.]+ 天。`, last.Text)
+	require.Contains(t, last.Text, "请及时在 4router 充值")
+
+	quota = 60_000_000 // 充值到 ¥120
+	h.now = now.Add(10 * time.Minute)
+	h.catchUp()
+	h.s.Step(context.Background())
+	require.True(t, alerts.last(alertBalance).Resolved)
+	require.Contains(t, alerts.last(alertBalance).Text, "账户余额已回到 ¥120.00")
+
+	quota = 0
+	h.now = now.Add(15 * time.Minute)
+	h.catchUp()
+	h.s.Step(context.Background())
+	require.Contains(t, alerts.last(alertBalance).Text, "账户余额已用完（¥0.00）")
+	require.Equal(t, balanceEmpty, alerts.last(alertBalance).Level, "用完比低于提醒线严重，不受去重限制")
+}
+
+func TestNoBalanceAlertWithoutThreshold(t *testing.T) {
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, cst)
+	quota := int64(0)
+	alerts := &fakeAlerter{}
+	h := newHarness(t, now, &fakeUpstream{quota: &quota}, WithAlerter(alerts))
+	h.catchUp()
+	require.Empty(t, alerts.raised(), "没配 balance_below 时不提醒")
 }

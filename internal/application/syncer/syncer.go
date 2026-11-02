@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"time"
 
@@ -31,9 +32,19 @@ const (
 
 // 告警的 key（同一 key 6 小时内只发一次，见 alert 包）。
 const (
-	alertAuth = "auth"
-	alertLag  = "lag"
+	alertAuth    = "auth"
+	alertLag     = "lag"
+	alertBalance = "balance"
 )
+
+// 余额告警的严重程度：低于提醒线、用完。从低于提醒线变成用完时不受 6 小时去重限制，立即发。
+const (
+	balanceLow   = 1
+	balanceEmpty = 2
+)
+
+// spendWindow 是估算日均消费用的时间段：最近 7 天（本地数据不够 7 天时用已有的，至少 1 天）。
+const spendWindow = 7 * 24 * time.Hour
 
 type Config struct {
 	LogInterval           time.Duration
@@ -46,6 +57,8 @@ type Config struct {
 	BackupDir             string
 	BackupKeepDays        int
 	Location              *time.Location
+	// BalanceBelow：账户余额（显示币种）低于它时发通知；0 表示不提醒（§4.7）。
+	BalanceBelow float64
 }
 
 type Syncer struct {
@@ -60,11 +73,14 @@ type Syncer struct {
 
 	cursor        int64
 	backfillUntil int64
-	pausedUntil   time.Time
-	next          map[string]time.Time
-	states        map[string]port.TaskState
-	lastDay       map[string]string // 每日任务 → 最后完成的日期
-	tasks         []task
+	// cur 是上游的换算参数，换算余额用；还没取到时 curOK 为 false，不检查余额。
+	cur         usage.Currency
+	curOK       bool
+	pausedUntil time.Time
+	next        map[string]time.Time
+	states      map[string]port.TaskState
+	lastDay     map[string]string // 每日任务 → 最后完成的日期
+	tasks       []task
 }
 
 type task struct {
@@ -155,6 +171,11 @@ func (s *Syncer) Init(ctx context.Context) error {
 	s.cursor = cursor
 	if s.backfillUntil, _, err = s.kvInt(ctx, port.KeyBackfillUntil); err != nil {
 		return err
+	}
+	if v, ok, err := s.store.GetKV(ctx, port.KeyCurrency); err != nil {
+		return err
+	} else if ok && json.Unmarshal([]byte(v), &s.cur) == nil {
+		s.curOK = s.cur.QuotaPerUnit > 0
 	}
 	for _, t := range s.tasks {
 		v, ok, err := s.store.GetKV(ctx, port.KeyTaskPrefix+t.name)
@@ -248,6 +269,7 @@ func (s *Syncer) statusTask(ctx context.Context, now time.Time) (time.Time, erro
 	if err != nil {
 		return now.Add(time.Minute), err
 	}
+	s.cur, s.curOK = cur, cur.QuotaPerUnit > 0
 	b, _ := json.Marshal(cur)
 	return now.Add(statusInterval), s.store.SetKV(ctx, port.KeyCurrency, string(b))
 }
@@ -281,7 +303,11 @@ func (s *Syncer) snapshot(ctx context.Context, slot, now time.Time) error {
 	}
 	acc.UpdatedAt = now.Unix()
 	b, _ := json.Marshal(acc)
-	return s.store.SetKV(ctx, port.KeyAccount, string(b))
+	if err := s.store.SetKV(ctx, port.KeyAccount, string(b)); err != nil {
+		return err
+	}
+	s.checkBalance(ctx, acc)
+	return nil
 }
 
 func (s *Syncer) logsTask(ctx context.Context, now time.Time) (time.Time, error) {
@@ -357,4 +383,70 @@ func (s *Syncer) checkLag(ctx context.Context, now time.Time) {
 		text += "最近的错误：" + st.LastError
 	}
 	s.alert.Notify(ctx, port.Alert{Key: alertLag, Text: text})
+}
+
+// checkBalance：账户余额低于提醒线时发通知（6 小时内只发一次，见 alert 包），回到提醒线以上时发恢复通知（§4.7）。
+// 余额在每次令牌快照后检查（5 分钟一次）；消息里附上日均消费和预计还能用几天。
+func (s *Syncer) checkBalance(ctx context.Context, acc usage.Account) {
+	limit := s.cfg.BalanceBelow
+	if limit <= 0 || !s.curOK {
+		return
+	}
+	balance := s.cur.Amount(acc.Quota)
+	if balance >= limit {
+		s.alert.Notify(ctx, port.Alert{Key: alertBalance, Resolved: true,
+			Text: fmt.Sprintf("账户余额已回到 %s（提醒线 %s）。", s.money(balance), s.money(limit))})
+		return
+	}
+	var text string
+	level := balanceLow
+	if balance <= 0 {
+		level = balanceEmpty
+		text = fmt.Sprintf("账户余额已用完（%s），调用会失败，请尽快在 4router 充值。", s.money(balance))
+	} else {
+		text = fmt.Sprintf("账户余额 %s，低于提醒线 %s。", s.money(balance), s.money(limit))
+		if days, daily, ok := s.dailySpend(ctx); ok && daily > 0 {
+			text += fmt.Sprintf("近 %s日均消费 %s，按这个速度大约还能用 %.1f 天。", days, s.money(daily), balance/daily)
+		}
+		text += "请及时在 4router 充值。"
+	}
+	s.alert.Notify(ctx, port.Alert{Key: alertBalance, Level: level, Text: text})
+}
+
+// dailySpend 用本地已同步的明细估算日均消费：最近 7 天，本地数据不够时用已有的。回填中、或不到 1 天数据时不估算。
+func (s *Syncer) dailySpend(ctx context.Context) (label string, daily float64, ok bool) {
+	if s.Backfilling() {
+		return "", 0, false
+	}
+	start := time.Unix(s.cursor, 0).Add(-spendWindow).Unix()
+	if since, ok, err := s.store.GetKV(ctx, port.KeyDataSince); err == nil && ok {
+		if t, err := time.ParseInLocation(usage.DayLayout, since, s.cfg.Location); err == nil && t.Unix() > start {
+			start = t.Unix()
+		}
+	}
+	span := float64(s.cursor-start) / 86400
+	if span < 1 {
+		return "", 0, false
+	}
+	quota, err := s.store.LocalQuota(ctx, start, s.cursor)
+	if err != nil {
+		s.log.Warn("估算日均消费失败", "error", err)
+		return "", 0, false
+	}
+	label = fmt.Sprintf("%.0f 天", math.Round(span))
+	if span < 6.95 {
+		label = fmt.Sprintf("%.1f 天", span)
+	}
+	return label, s.cur.Amount(quota) / span, true
+}
+
+// money 按上游的显示币种格式化金额。
+func (s *Syncer) money(v float64) string {
+	switch s.cur.DisplayType {
+	case "CNY":
+		return fmt.Sprintf("¥%.2f", v)
+	case "USD":
+		return fmt.Sprintf("$%.2f", v)
+	}
+	return fmt.Sprintf("%.0f", v)
 }

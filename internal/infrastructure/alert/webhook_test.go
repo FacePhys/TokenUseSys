@@ -126,3 +126,24 @@ func TestSendSurvivesCancelledContext(t *testing.T) {
 	cancel()
 	require.NoError(t, w.Send(ctx, "停机时的告警"), "停机时正在发的告警照样发完")
 }
+
+func TestEscalationBypassesDedupe(t *testing.T) {
+	r := &robot{reply: `{"errcode":0}`}
+	w, _, now := newTestWebhook(t, r, "")
+	ctx := context.Background()
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 1, Text: "余额低于提醒线"})
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 1, Text: "余额低于提醒线"})
+	require.Len(t, r.messages, 1)
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 2, Text: "余额用完"})
+	require.Len(t, r.messages, 2, "情况变严重时立即发")
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 2, Text: "余额用完"})
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 1, Text: "余额低于提醒线"})
+	require.Len(t, r.messages, 2, "同级或变轻都按 6 小时去重")
+	*now = now.Add(6 * time.Hour)
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 1, Text: "余额低于提醒线"})
+	require.Len(t, r.messages, 3)
+	w.Notify(ctx, port.Alert{Key: "balance", Level: 2, Text: "余额用完"})
+	require.Len(t, r.messages, 4, "上次发的是低一级的，再变严重照样立即发")
+	w.Notify(ctx, port.Alert{Key: "balance", Resolved: true, Text: "已充值"})
+	require.Len(t, r.messages, 5, "恢复只发一条")
+}
