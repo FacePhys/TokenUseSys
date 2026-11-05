@@ -4,7 +4,7 @@ import {
   $, COLORED_TOKENS, METRICS, api, axisStyle, badge, baseOption, carryQuery, clearError, clock, colorPlan, compact,
   daysBetween, el, formatMetric, int, lineValues, logout, metricName, metricOf, money, mountChart, nameSlot, onThemeChange,
   palette, pct, rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table,
-  tokenColorPlan, tooltipNode, writeParams, dateTime,
+  metricOrders, sortByValue, tokenColorPlan, tooltipNode, writeParams, dateTime,
 } from './app.js';
 
 // 柱状图和「按令牌」饼图单独显示区间内消费前 8 名令牌（色板正好 8 色，见 tokenColorPlan），其余合并为灰色的「其他」；
@@ -111,8 +111,8 @@ function openToken(id) {
 function render() {
   if (!state.tokens) return;
   const pal = palette();
-  // 令牌颜色跟着令牌走（按累计消费定首选色位），排列顺序保证相邻的颜色分得清；柱状图、饼图、令牌表用同一份。
-  // 接口已经把前 8 名以外合并成「其他」（token_id 为 null），前 8 名按区间金额从高到低排。
+  // 令牌颜色跟着令牌走（按累计消费定首选色位），换指标不变；配色时让每种指标的排法里相邻的颜色都分得清。
+  // 柱状图、饼图、令牌表用同一份。接口已经把前 8 名以外合并成「其他」（token_id 为 null），前 8 名按区间金额从高到低排。
   const lines = state.series.series;
   const plan = tokenColorPlan(lines.filter((l) => l.token_id !== null).map((l) => l.token_id), state.tokens.items,
     lines.some((l) => l.token_id === null));
@@ -177,12 +177,6 @@ function renderKPIs() {
   );
 }
 
-// 序列按颜色方案的顺序排（相邻的颜色分得清），「其他」放在最上面。
-function orderedLines(plan) {
-  const byId = new Map(state.series.series.map((l) => [l.token_id, l]));
-  return [...plan.order.map((id) => byId.get(id)), ...(byId.has(null) ? [byId.get(null)] : [])];
-}
-
 function uniqueNames(lines) {
   const seen = new Map();
   for (const l of lines) seen.set(l.name, (seen.get(l.name) || 0) + 1);
@@ -193,7 +187,8 @@ function renderBar(pal, plan, colorOf) {
   const { series } = state;
   const metric = state.params.metric;
   const cur = series.currency;
-  const lines = orderedLines(plan);
+  // 堆叠顺序就是接口的顺序：区间金额大的在下面，「其他」在最上面；换指标时每个令牌的位置不变。
+  const lines = series.series;
   const names = uniqueNames(lines);
   const values = lines.map((l) => lineValues(l, metric));
   const colors = lines.map((l) => (l.token_id === null ? pal.other : colorOf(l.token_id)));
@@ -317,23 +312,25 @@ function renderPie(pal, plan, colorOf) {
   let rows;
   let total;
   if (state.pieMode === 'token') {
-    // 和柱状图同一批令牌、同一套颜色和顺序；块的大小按当前指标。「其他」是其余令牌实际相加，不用合计相减。
+    // 和柱状图同一批令牌、同一套颜色；按当前指标从大到小排，「其他」放最后（是其余令牌实际相加，不用合计相减）。
     const byId = new Map(state.tokens.items.map((t) => [t.id, t]));
     total = metricOf(state.tokens.total, metric);
-    rows = plan.order.map((id) => {
+    rows = sortByValue([...plan.slots.keys()].map((id) => {
       const item = byId.get(id);
       return { id, name: item ? item.name : `#${id}`, value: item ? metricOf(item.usage, metric) : 0, color: colorOf(id) };
-    });
+    }), (r) => r.value);
     const rest = state.tokens.items.filter((t) => !plan.slots.has(t.id)).reduce((s, t) => s + metricOf(t.usage, metric), 0);
     if (rest > 0) rows.push({ name: OTHERS, value: rest, color: pal.other });
   } else {
+    // 区间金额前 5 个模型单独显示，按当前指标从大到小排；模型按名字定颜色，换指标不变。
     const items = state.models.items; // 已按金额排序
     total = metricOf(state.models.total, metric);
-    const top = items.slice(0, TOP_MODELS);
-    const mplan = colorPlan(top.map((m) => m.model), nameSlot, { circular: items.length <= TOP_MODELS });
-    const byName = new Map(top.map((m) => [m.model, m]));
-    rows = mplan.order.map((name) => ({ name: name || '（未知模型）', value: metricOf(byName.get(name), metric),
-      color: pal.series[mplan.slots.get(name)] }));
+    const names = items.slice(0, TOP_MODELS).map((m) => m.model);
+    const byName = new Map(items.map((m) => [m.model, m]));
+    const mplan = colorPlan(names, nameSlot,
+      { orders: metricOrders(names, (n) => byName.get(n)), circular: items.length <= TOP_MODELS });
+    rows = sortByValue(names, (n) => metricOf(byName.get(n), metric)).map((name) => ({ name: name || '（未知模型）',
+      value: metricOf(byName.get(name), metric), color: pal.series[mplan.slots.get(name)] }));
     // 模型的「其他」是其余模型实际相加，不用合计相减。
     const rest = items.slice(TOP_MODELS).reduce((s, m) => s + metricOf(m, metric), 0);
     if (rest > 0) rows.push({ name: OTHERS, value: rest, color: pal.other });

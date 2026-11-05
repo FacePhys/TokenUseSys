@@ -3,8 +3,8 @@
 import {
   $, METRICS, api, axisStyle, baseOption, carryQuery, clearError, colorPlan, compact, dateOnly, dateTime, daysBetween, el,
   formatMetric, int, lineValues, logout, metricName, metricOf, money, mountChart, nameSlot, onThemeChange, palette, pct,
-  rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table, tokenColorPlan,
-  tokenSlotOrder, tooltipNode, writeParams,
+  rangeLabel, rangePicker, readParams, segmented, setTimeZone, showError, statusBadge, swatch, table, metricOrders,
+  sortByValue, tokenColorPlan, tokenSlotOrder, tooltipNode, writeParams,
 } from './app.js';
 
 const TOP_MODELS = 5; // 饼图单独显示的模型数，其余合并为「其他」
@@ -89,8 +89,12 @@ function render() {
     .sort((a, b) => b.usage.amount - a.usage.amount || a.id - b.id).map((t) => t.id);
   const plan = tokenColorPlan(used, state.tokens.items);
   const color = pal.series[plan.slots.has(id) ? plan.slots.get(id) : tokenSlotOrder(state.tokens.items)(id) % 8];
+  // 区间金额前 5 个模型着色；模型按名字定颜色，换指标不变，配色时让每种指标的排法里相邻的颜色都分得清。
   const items = state.models.items; // 已按金额排序
-  const mplan = colorPlan(items.slice(0, TOP_MODELS).map((m) => m.model), nameSlot, { circular: items.length <= TOP_MODELS });
+  const names = items.slice(0, TOP_MODELS).map((m) => m.model);
+  const byName = new Map(items.map((m) => [m.model, m]));
+  const mplan = colorPlan(names, nameSlot,
+    { orders: metricOrders(names, (n) => byName.get(n)), circular: items.length <= TOP_MODELS });
   const modelColor = (name) => (mplan.slots.has(name) ? pal.series[mplan.slots.get(name)] : pal.other);
   document.title = `${state.token.name} · 令牌用量`;
   renderHeader();
@@ -250,9 +254,10 @@ function renderModels(pal, mplan, modelColor) {
   const cur = models.currency;
   const total = metricOf(models.total, metric);
   const f = (v) => formatMetric(v, metric, cur);
-  // 前 5 个模型按颜色方案的顺序排（相邻的颜色分得清），「其他」是其余模型实际相加。
+  // 前 5 个模型按当前指标从大到小排，「其他」放最后（是其余模型实际相加）。
   const byName = new Map(models.items.map((m) => [m.model, m]));
-  const rows = mplan.order.map((name) => ({ name: name || '（未知模型）', value: metricOf(byName.get(name), metric), color: modelColor(name) }));
+  const rows = sortByValue([...mplan.slots.keys()], (n) => metricOf(byName.get(n), metric))
+    .map((name) => ({ name: name || '（未知模型）', value: metricOf(byName.get(name), metric), color: modelColor(name) }));
   const rest = models.items.slice(TOP_MODELS).reduce((s, m) => s + metricOf(m, metric), 0);
   if (rest > 0) rows.push({ name: '其他', value: rest, color: pal.other });
   const slices = rows.filter((r) => r.value > 0);
@@ -277,7 +282,7 @@ function renderModels(pal, mplan, modelColor) {
     }],
   }, true);
 
-  // 模型分布表：全部模型，兼作饼图的图例和表格视图。
+  // 模型分布表：全部模型，按当前指标从大到小排，兼作饼图的图例和表格视图。
   const t = models.total;
   $('model-table').replaceChildren(models.items.length ? table({
     columns: [
@@ -289,7 +294,7 @@ function renderModels(pal, mplan, modelColor) {
       { label: '金额', num: true, get: (m) => money(m.amount, cur) },
       { label: `占比（${METRICS.find((m) => m.key === metric).label}）`, num: true, get: (m) => pct(total > 0 ? metricOf(m, metric) / total : 0) },
     ],
-    rows: models.items,
+    rows: sortByValue(models.items, (m) => metricOf(m, metric)),
     footer: ['合计', int(t.requests), compact(t.prompt_tokens), compact(t.completion_tokens), compact(t.cache_read_tokens),
       money(t.amount, cur), total > 0 ? '100%' : '—'],
   }) : el('div', { class: 'empty', text: '这段时间没有用量' }));

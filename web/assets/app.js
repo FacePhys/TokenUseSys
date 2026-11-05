@@ -374,50 +374,65 @@ export function assignSlots(keys, preferred) {
   return slots;
 }
 
-/**
- * 找相邻颜色都分得清的顺序，同样好时尽量保持原顺序（代价 = 不合格的相邻对 × 1000 + 偏离原名次的总步数）。
- * 按原顺序回溯搜索、代价不可能更小的分支直接剪掉：最多 8 个（40320 种排列）也只走很少几步。
- */
-function arrange(keys, slots, circular) {
-  const rank = new Map(keys.map((k, i) => [k, i]));
-  const order = [];
-  const taken = new Set();
-  let best = null;
-  const cost = (bad, drift) => bad * 1000 + drift;
-  const visit = (bad, drift) => {
-    if (best && cost(bad, drift) >= cost(best.bad, best.drift)) return;
-    if (order.length === keys.length) {
-      if (circular && keys.length > 2 && badPair(slots.get(order[order.length - 1]), slots.get(order[0]))) bad++;
-      if (!best || cost(bad, drift) < cost(best.bad, best.drift)) best = { order: order.slice(), bad, drift };
-      return;
-    }
-    for (const k of keys) {
-      if (taken.has(k)) continue;
-      const b = order.length > 0 && badPair(slots.get(order[order.length - 1]), slots.get(k)) ? 1 : 0;
-      taken.add(k);
-      order.push(k);
-      visit(bad + b, drift + Math.abs(order.length - 1 - rank.get(k)));
-      order.pop();
-      taken.delete(k);
-    }
-  };
-  visit(0, 0);
-  return best || { order: [], bad: 0 };
+/** 按 value 从大到小排，一样大时保持原来的顺序（名次）。饼图、图例、模型表都按它排。 */
+export function sortByValue(keys, value) {
+  return [...keys].sort((a, b) => value(b) - value(a));
+}
+
+/** 每种指标各按数值排一次：图里的排列跟着当前指标变，配色要照顾到每一种排法。usageOf(key) 返回用量。 */
+export function metricOrders(keys, usageOf) {
+  return METRICS.map((m) => sortByValue(keys, (k) => {
+    const u = usageOf(k);
+    return u ? metricOf(u, m.key) : 0;
+  }));
 }
 
 /**
- * 给一个视图里要着色的实体（最多 8 个，按名次排好）定色位和排列顺序（堆叠、图例、饼图共用）：
- * 先按首选色位分配，再找相邻都分得清的顺序；找不到时改用色板前几位按名次排（色板相邻顺序已校验过）。
- * circular 为真时首尾也算相邻（饼图里没有灰色块隔开时）。灰色的放在最后，和谁相邻都可以。
+ * 给一个视图里要着色的实体（最多 8 个，按名次排好）定色位。排列顺序由数值决定（大的在前），这里只挑颜色、不改顺序：
+ * 尽量用各自的首选色位，同时让 orders 里每一种排法（每种指标按数值排一次）相邻的颜色都分得清。换指标时颜色不变。
+ * 代价 = 不合格的相邻对 × 1000 + 没用上首选色位的个数；按名次回溯搜索，代价不可能更小的分支直接剪掉。
+ * circular 为真时首尾也算相邻（饼图里没有灰色块隔开时）。灰色的「其他」放在最后，和谁相邻都可以。
  */
-export function colorPlan(keys, preferred, { circular = false } = {}) {
-  let slots = assignSlots(keys, preferred);
-  let best = arrange(keys, slots, circular);
-  if (best.bad > 0) {
-    slots = new Map(keys.map((k, i) => [k, i]));
-    best = { order: keys.slice() };
+export function colorPlan(keys, preferred, { orders = [keys], circular = false } = {}) {
+  const want = assignSlots(keys, preferred);
+  // 每个实体在任一排法里挨着的实体（按名次的下标）。
+  const index = new Map(keys.map((k, i) => [k, i]));
+  const neighbors = keys.map(() => new Set());
+  for (const order of orders) {
+    for (let i = 0; i < order.length; i++) {
+      const next = i + 1 < order.length ? order[i + 1] : circular && order.length > 2 ? order[0] : undefined;
+      if (next === undefined) continue;
+      const a = index.get(order[i]);
+      const b = index.get(next);
+      neighbors[a].add(b);
+      neighbors[b].add(a);
+    }
   }
-  return { slots, order: best.order };
+  const slots = [];
+  const taken = new Set();
+  let best = null;
+  const visit = (i, bad, drift) => {
+    if (best && bad * 1000 + drift >= best.cost) return;
+    if (i === keys.length) {
+      best = { cost: bad * 1000 + drift, slots: slots.slice() };
+      return;
+    }
+    // 先试首选色位，再按色板顺序试其余的。
+    const first = want.get(keys[i]);
+    for (let n = -1; n < 8; n++) {
+      const s = n < 0 ? first : n;
+      if ((n >= 0 && s === first) || taken.has(s)) continue;
+      let b = 0;
+      for (const j of neighbors[i]) if (j < i && badPair(slots[j], s)) b++;
+      taken.add(s);
+      slots[i] = s;
+      visit(i + 1, bad + b, drift + (s === first ? 0 : 1));
+      slots.length = i;
+      taken.delete(s);
+    }
+  };
+  visit(0, 0, 0);
+  return { slots: new Map(keys.map((k, i) => [k, best.slots[i]])) };
 }
 
 /**
@@ -428,10 +443,14 @@ export const COLORED_TOKENS = 8;
 
 /**
  * 令牌的配色方案（总览和详情页共用，同一区间里颜色一致）：rankedIds 按区间消费从高到低，前 COLORED_TOKENS 个着色。
+ * tokens 是 /api/v1/tokens 的 items（带区间用量），用来算各指标下的排法。
  * more 表示前几名之外还有令牌（合并成「其他」，饼图里把首尾两块隔开）；只传了前几名时由调用方告诉它。
  */
 export function tokenColorPlan(rankedIds, tokens, more = rankedIds.length > COLORED_TOKENS) {
-  return colorPlan(rankedIds.slice(0, COLORED_TOKENS), tokenSlotOrder(tokens), { circular: !more });
+  const keys = rankedIds.slice(0, COLORED_TOKENS);
+  const byId = new Map(tokens.map((t) => [t.id, t]));
+  return colorPlan(keys, tokenSlotOrder(tokens),
+    { orders: metricOrders(keys, (id) => byId.get(id)?.usage), circular: !more });
 }
 
 // ---- 图表 ----
